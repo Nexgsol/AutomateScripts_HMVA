@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-  script_form, request_detail, ScriptGenerateAPI, ScriptGetAPI,
+  avatar_quick_create, script_form, request_detail, ScriptGenerateAPI, ScriptGetAPI,
   RenderAvatarAPI, AssembleAPI, DriveAPI, CaptionsAPI, AirtableSyncAPI,
   ScheduleAPI, PublishAPI, MetricsAPI
 )
@@ -18,4 +18,5 @@ urlpatterns = [
     path("v1/requests/<int:pk>/schedule", ScheduleAPI.as_view()),
     path("v1/requests/<int:pk>/publish", PublishAPI.as_view()),
     path("v1/requests/<int:pk>/metrics24h", MetricsAPI.as_view()),
+    path("avatar/new/", avatar_quick_create, name="avatar-new"),
 ]

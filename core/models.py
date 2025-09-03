@@ -18,6 +18,22 @@ class AvatarProfile(models.Model):
     image = models.ImageField(upload_to="avatars/", blank=True, null=True)  
     def __str__(self): return f"{self.brand}:{self.avatar_name}/{self.voice_name}"
 
+
+class TTSAudio(models.Model):
+    voice_id = models.CharField(max_length=100, db_index=True)
+    text_hash = models.CharField(max_length=64, db_index=True)
+    text_excerpt = models.CharField(max_length=200)
+    settings = models.JSONField(default=dict, blank=True)
+
+    file = models.FileField(upload_to="tts/", blank=True, null=True)
+    file_url = models.URLField(blank=True)              # if you later host it
+    eleven_history_id = models.CharField(max_length=64, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"TTS {self.voice_id} · {self.text_excerpt[:40]}..."
+
 class Template(models.Model):
     ENGINE_CHOICES = [("shotstack","Shotstack"),("cloudinary","Cloudinary")]
     brand = models.ForeignKey(Brand, on_delete=models.CASCADE)

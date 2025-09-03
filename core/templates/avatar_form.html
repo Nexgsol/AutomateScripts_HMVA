@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Create Avatar Profile</h3>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  <label>Brand</label>
+  <select name="brand" required>
+    {% for b in brands %}<option value="{{b.id}}">{{b.name}}</option>{% endfor %}
+  </select>
+
+  <label>Avatar Name</label>
+  <input name="avatar_name" placeholder="Heritage Host" required/>
+
+  <label>Voice Name (label)</label>
+  <input name="voice_name" placeholder="Daniel"/>
+
+  <label>ElevenLabs Voice ID</label>
+  <input name="eleven_id" placeholder="elevenlabs-voice-id"/>
+
+  <label>Avatar Photo (optional)</label>
+  <input type="file" name="photo" accept="image/*"/>
+
+  <p style="font-size:12px;color:#666;margin-top:8px;">
+    If your HeyGen account supports creating photo avatars via API, we can wire that to auto-generate an avatar_id.
+    Otherwise, paste the HeyGen avatar_id later in /admin.
+  </p>
+
+  <div style="margin-top:12px"><button type="submit">Save Avatar</button></div>
+</form>
+{% endblock %}

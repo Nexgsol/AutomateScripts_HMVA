@@ -1,6 +1,8 @@
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
+
+from core.services.tts_service import fetch_or_create_tts_audio, load_audio_bytes
 from .models import ScriptRequest, PublishTarget
 from .prompts import GENERATOR_SYSTEM, gen_user, finalize_user, CAPTION_SYSTEM, captions_user
 from . import utils
@@ -30,43 +32,41 @@ def task_generate_script(sr_id: int):
     sr.save()
     return sr.id
 
+
 @shared_task
 def task_render_avatar(sr_id: int):
     sr = ScriptRequest.objects.get(id=sr_id)
-
-    # Ensure we have a final script
     if not sr.final_script:
         task_generate_script(sr.id)
         sr.refresh_from_db()
 
-    # Ensure avatar has both HeyGen avatar_id and ElevenLabs voice_id
     if not (sr.avatar and sr.avatar.heygen_avatar_id and sr.avatar.elevenlabs_voice_id):
         raise ValueError("Avatar profile with HeyGen avatar id and ElevenLabs voice id is required.")
 
-    # 1) TTS (bytes)
-    mp3 = tts_elevenlabs.synthesize_bytes(sr.final_script, sr.avatar.elevenlabs_voice_id)
-
-    # 2) HeyGen: upload + generate + wait + share URL
-    res = avatar_heygen.generate_from_audio_bytes(
-        avatar_id=sr.avatar.heygen_avatar_id,
-        mp3_bytes=mp3,
-        title=f"{sr.icon_or_topic} · req#{sr.id}",
-        width=1080, height=1920, background_color="#000000",
-        wait_timeout_sec=900, poll_sec=10
+    # Fetch or create (re-use) the TTS asset and get its bytes
+    tts_rec = fetch_or_create_tts_audio(
+        voice_id=sr.avatar.elevenlabs_voice_id,
+        text=sr.final_script,
+        settings={"stability": 0.5, "similarity_boost": 0.75},
+        attach_history=True,
     )
+    mp3 = load_audio_bytes(tts_rec)
 
+    # Continue with HeyGen upload/render (unchanged) ...
+    res = avatar_heygen.generate_from_audio_bytes(
+        sr.avatar.heygen_avatar_id, mp3, title=f"{sr.icon_or_topic} · req#{sr.id}"
+    )
     if res.get("status") != "completed":
         sr.status = "Assembling"
         sr.qc_json = {**(sr.qc_json or {}), "heygen_status": res}
         sr.save()
         return res
 
-    sr.asset_url = res.get("video_url", "") or sr.asset_url
-    sr.edit_url  = res.get("share_url", "") or sr.edit_url
+    sr.asset_url = res.get("video_url","") or sr.asset_url
+    sr.edit_url  = res.get("share_url","") or sr.edit_url
     sr.status = "Rendered"
-    sr.updated_at = timezone.now()
     sr.save()
-    return {"video_url": sr.asset_url, "share_url": sr.edit_url}
+    return {"video_url": sr.asset_url, "share_url": sr.edit_url, "eleven_history_id": tts_rec.eleven_history_id}
 
 
 @shared_task
