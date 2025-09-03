@@ -33,29 +33,41 @@ def task_generate_script(sr_id: int):
 @shared_task
 def task_render_avatar(sr_id: int):
     sr = ScriptRequest.objects.get(id=sr_id)
+
+    # Ensure we have a final script
     if not sr.final_script:
         task_generate_script(sr.id)
         sr.refresh_from_db()
+
+    # Ensure avatar has both HeyGen avatar_id and ElevenLabs voice_id
     if not (sr.avatar and sr.avatar.heygen_avatar_id and sr.avatar.elevenlabs_voice_id):
         raise ValueError("Avatar profile with HeyGen avatar id and ElevenLabs voice id is required.")
+
+    # 1) TTS (bytes)
     mp3 = tts_elevenlabs.synthesize_bytes(sr.final_script, sr.avatar.elevenlabs_voice_id)
-    audio_asset_id = avatar_heygen.upload_audio_asset(mp3)
-    video_id = avatar_heygen.create_avatar_video(sr.avatar.heygen_avatar_id, audio_asset_id,
-                                                 title=f"{sr.icon_or_topic} · req#{sr.id}", width=1080, height=1920)
-    status = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
-    if status.get("status") != "completed":
+
+    # 2) HeyGen: upload + generate + wait + share URL
+    res = avatar_heygen.generate_from_audio_bytes(
+        avatar_id=sr.avatar.heygen_avatar_id,
+        mp3_bytes=mp3,
+        title=f"{sr.icon_or_topic} · req#{sr.id}",
+        width=1080, height=1920, background_color="#000000",
+        wait_timeout_sec=900, poll_sec=10
+    )
+
+    if res.get("status") != "completed":
         sr.status = "Assembling"
-        sr.qc_json = {**(sr.qc_json or {}), "heygen_status": status}
+        sr.qc_json = {**(sr.qc_json or {}), "heygen_status": res}
         sr.save()
-        return status
-    video_url = status.get("video_url","")
-    share_url = avatar_heygen.get_share_url(video_id) or ""
-    sr.asset_url = video_url
-    sr.edit_url = share_url
+        return res
+
+    sr.asset_url = res.get("video_url", "") or sr.asset_url
+    sr.edit_url  = res.get("share_url", "") or sr.edit_url
     sr.status = "Rendered"
     sr.updated_at = timezone.now()
     sr.save()
-    return {"video_url": video_url, "share_url": share_url}
+    return {"video_url": sr.asset_url, "share_url": sr.edit_url}
+
 
 @shared_task
 def task_assemble_template(sr_id: int):
@@ -168,17 +180,14 @@ def task_metrics_24h(sr_id: int):
 
 @shared_task
 def task_kickoff_chain(sr_id: int):
-    """
-    Full auto pipeline: script -> avatar -> assemble -> Drive -> captions -> Airtable -> schedule
-    """
     flow = chain(
-        task_generate_script.s(sr_id),
-        task_render_avatar.s(sr_id),
-        task_assemble_template.s(sr_id),
-        task_push_drive.s(sr_id),
-        task_generate_captions.s(sr_id),
-        task_sync_airtable.s(sr_id),
-        task_schedule.s(sr_id),
+        task_generate_script.si(sr_id),
+        task_render_avatar.si(sr_id),
+        task_assemble_template.si(sr_id),
+        task_push_drive.si(sr_id),
+        task_generate_captions.si(sr_id),
+        task_sync_airtable.si(sr_id),
+        task_schedule.si(sr_id),
     )
     flow.delay()
     return {"pipeline": "queued", "sr_id": sr_id}
