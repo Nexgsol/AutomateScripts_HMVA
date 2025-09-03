@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Create Script Request</h3>
+<form method="post">{% csrf_token %}
+  <label>Brand</label>
+  <select name="brand" required>
+    {% for b in brands %}<option value="{{b.id}}">{{b.name}}</option>{% endfor %}
+  </select>
+
+  <label>Icon / Topic</label>
+  <input name="icon" placeholder="Steve McQueen" required/>
+
+  <label>Notes</label>
+  <textarea name="notes" rows="3" placeholder="Persol 714; Harrington jacket; motorcycle roles"></textarea>
+
+  <label>Duration</label>
+  <select name="duration">
+    <option value="15s">15s</option>
+    <option value="30s" selected>30s</option>
+    <option value="60s">60s</option>
+  </select>
+
+  <label>Avatar (optional)</label>
+  <select name="avatar">
+    <option value="">--</option>
+    {% for a in avatars %}<option value="{{a.id}}">{{a.avatar_name}} / {{a.voice_name}} ({{a.brand.name}})</option>{% endfor %}
+  </select>
+
+  <label>Template (optional)</label>
+  <select name="template">
+    <option value="">--</option>
+    {% for t in templates %}<option value="{{t.id}}">{{t.engine}} / {{t.template_id}} ({{t.brand.name}})</option>{% endfor %}
+  </select>
+  <label style="margin-top:8px;">
+    <input type="checkbox" name="auto"> Run full pipeline automatically
+  </label>
+
+
+  <div style="margin-top:12px"><button type="submit">Generate</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,59 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    ports: [ "8000:8000" ]
+    environment:
+      DJANGO_SECRET_KEY: change-me
+      DJANGO_DEBUG: "1"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+      TIMEZONE: "America/New_York"
+      REDIS_URL: "redis://redis:6379/0"
+      HEYGEN_API_KEY: ""
+      ELEVENLABS_API_KEY: ""
+      GDRIVE_SERVICE_ACCOUNT_JSON: ""
+      GDRIVE_FOLDER_ID: ""
+      AIRTABLE_TOKEN: ""
+      AIRTABLE_BASE_ID: ""
+      AIRTABLE_TABLE: "Requests"
+    depends_on: [ redis ]
+  worker:
+    build: .
+    command: celery -A hmva worker --loglevel=INFO
+    environment:
+      DJANGO_SECRET_KEY: change-me
+      DJANGO_DEBUG: "1"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+      TIMEZONE: "America/New_York"
+      REDIS_URL: "redis://redis:6379/0"
+      HEYGEN_API_KEY: ""
+      ELEVENLABS_API_KEY: ""
+      GDRIVE_SERVICE_ACCOUNT_JSON: ""
+      GDRIVE_FOLDER_ID: ""
+      AIRTABLE_TOKEN: ""
+      AIRTABLE_BASE_ID: ""
+      AIRTABLE_TABLE: "Requests"
+    depends_on: [ redis, web ]
+  beat:
+    build: .
+    command: celery -A hmva beat --loglevel=INFO
+    environment:
+      DJANGO_SECRET_KEY: change-me
+      DJANGO_DEBUG: "1"
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: "gpt-4o-mini"
+      TIMEZONE: "America/New_York"
+      REDIS_URL: "redis://redis:6379/0"
+      HEYGEN_API_KEY: ""
+      ELEVENLABS_API_KEY: ""
+      GDRIVE_SERVICE_ACCOUNT_JSON: ""
+      GDRIVE_FOLDER_ID: ""
+      AIRTABLE_TOKEN: ""
+      AIRTABLE_BASE_ID: ""
+      AIRTABLE_TABLE: "Requests"
+    depends_on: [ redis, web ]
+  redis:
+    image: redis:7-alpine

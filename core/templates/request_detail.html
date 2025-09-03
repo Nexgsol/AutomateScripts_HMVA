@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>Request #{{ sr.id }} — {{ sr.icon_or_topic }}</h3>
+<p>Status: <strong>{{ sr.status }}</strong> · Brand: {{ sr.brand.name }} · Duration: {{ sr.duration }}</p>
+
+<h4>Draft</h4>
+<pre>{{ sr.draft_script|default:"(pending …)" }}</pre>
+
+<h4>QC JSON</h4>
+<pre>{{ sr.qc_json|default:"(pending …)" }}</pre>
+
+<h4>Final</h4>
+<pre>{{ sr.final_script|default:"(pending …)" }}</pre>
+
+{% if sr.asset_url %}
+  <h4>Asset</h4>
+  <p><a href="{{ sr.asset_url }}" target="_blank">{{ sr.asset_url }}</a></p>
+{% endif %}
+{% endblock %}
