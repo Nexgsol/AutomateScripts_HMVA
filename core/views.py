@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from core.utils import generate_heritage_paragraph
+from core.utils import generate_heritage_paragraph, call_openai_for_ssml
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -47,113 +47,112 @@ class AutoPipelineAPI(APIView):
         task_kickoff_chain.delay(pk)
         return Response({"id": pk, "auto_pipeline": "queued"}, status=status.HTTP_202_ACCEPTED)
 
-
-def request_detail(request, pk):
-    sr = get_object_or_404(ScriptRequest, pk=pk)
-    return render(request, "request_detail.html", {"sr": sr})
-
-
-class ScriptGenerateAPI(APIView):
-    def post(self, req):
-        ser = ScriptRequestSerializer(data=req.data)
-        ser.is_valid(raise_exception=True)
-        sr = ser.save(status="New")
-        task_generate_script.delay(sr.id)
-        return Response({"id": sr.id, "status": "queued"}, status=status.HTTP_201_CREATED)
-
-class ScriptGetAPI(APIView):
-    def get(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        return Response(ScriptRequestSerializer(sr).data)
-
-class RenderAvatarAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_render_avatar.delay(sr.id)
-        return Response({"id": sr.id, "render": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class AssembleAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_assemble_template.delay(sr.id)
-        return Response({"id": sr.id, "assemble": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class DriveAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_push_drive.delay(sr.id)
-        return Response({"id": sr.id, "drive": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class CaptionsAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_generate_captions.delay(sr.id)
-        return Response({"id": sr.id, "captions": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class AirtableSyncAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_sync_airtable.delay(sr.id)
-        return Response({"id": sr.id, "airtable": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class ScheduleAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_schedule.delay(sr.id)
-        return Response({"id": sr.id, "schedule": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class PublishAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_publish.delay(sr.id)
-        return Response({"id": sr.id, "publish": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-class MetricsAPI(APIView):
-    def post(self, req, pk):
-        sr = get_object_or_404(ScriptRequest, pk=pk)
-        task_metrics_24h.delay(sr.id)
-        return Response({"id": sr.id, "metrics24h": "queued"}, status=status.HTTP_202_ACCEPTED)
-
-def avatar_quick_create(request):
-    brands = Brand.objects.all()
-    ctx = {"brands": brands}
-    if request.method == "POST":
-        brand_id = request.POST["brand"]
-        avatar_name = request.POST["avatar_name"]
-        voice_name = request.POST.get("voice_name","")
-        eleven_id = request.POST.get("eleven_id","")
-        img = request.FILES.get("photo")
-
-        image_path = None
-        if img:
-            image_path = default_storage.save(f"avatars/{img.name}", ContentFile(img.read()))
-            # Try optional HeyGen photo-avatar API (stub returns "")
-            avatar_id = avatar_heygen.create_photo_avatar(open(default_storage.path(image_path),"rb").read(), avatar_name)
-        else:
-            avatar_id = ""
-
-        ap = AvatarProfile.objects.create(
-            brand_id=brand_id,
-            avatar_name=avatar_name,
-            voice_name=voice_name,
-            elevenlabs_voice_id=eleven_id,
-            heygen_avatar_id=avatar_id,
-            image=image_path
-        )
-        return redirect("script-form")
-    return render(request, "avatar_form.html", ctx)
+# def request_detail(request, pk):
+#     sr = get_object_or_404(ScriptRequest, pk=pk)
+#     return render(request, "request_detail.html", {"sr": sr})
 
 
-class ParagraphAPI(APIView):
-    def post(self, request):
-        icon = request.data.get("icon") or request.POST.get("icon")
-        notes = request.data.get("notes") or request.POST.get("notes", "")
-        if not icon:
-            return Response({"error": "icon is required"}, status=status.HTTP_400_BAD_REQUEST)
-        paragraph = generate_heritage_paragraph(
-            icon, notes
-        )
-        return Response({"icon": icon, "paragraph": paragraph}, status=status.HTTP_200_OK)
+# class ScriptGenerateAPI(APIView):
+#     def post(self, req):
+#         ser = ScriptRequestSerializer(data=req.data)
+#         ser.is_valid(raise_exception=True)
+#         sr = ser.save(status="New")
+#         task_generate_script.delay(sr.id)
+#         return Response({"id": sr.id, "status": "queued"}, status=status.HTTP_201_CREATED)
+
+# class ScriptGetAPI(APIView):
+#     def get(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         return Response(ScriptRequestSerializer(sr).data)
+
+# class RenderAvatarAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_render_avatar.delay(sr.id)
+#         return Response({"id": sr.id, "render": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class AssembleAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_assemble_template.delay(sr.id)
+#         return Response({"id": sr.id, "assemble": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class DriveAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_push_drive.delay(sr.id)
+#         return Response({"id": sr.id, "drive": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class CaptionsAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_generate_captions.delay(sr.id)
+#         return Response({"id": sr.id, "captions": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class AirtableSyncAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_sync_airtable.delay(sr.id)
+#         return Response({"id": sr.id, "airtable": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class ScheduleAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_schedule.delay(sr.id)
+#         return Response({"id": sr.id, "schedule": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class PublishAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_publish.delay(sr.id)
+#         return Response({"id": sr.id, "publish": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# class MetricsAPI(APIView):
+#     def post(self, req, pk):
+#         sr = get_object_or_404(ScriptRequest, pk=pk)
+#         task_metrics_24h.delay(sr.id)
+#         return Response({"id": sr.id, "metrics24h": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+# def avatar_quick_create(request):
+#     brands = Brand.objects.all()
+#     ctx = {"brands": brands}
+#     if request.method == "POST":
+#         brand_id = request.POST["brand"]
+#         avatar_name = request.POST["avatar_name"]
+#         voice_name = request.POST.get("voice_name","")
+#         eleven_id = request.POST.get("eleven_id","")
+#         img = request.FILES.get("photo")
+
+#         image_path = None
+#         if img:
+#             image_path = default_storage.save(f"avatars/{img.name}", ContentFile(img.read()))
+#             # Try optional HeyGen photo-avatar API (stub returns "")
+#             avatar_id = avatar_heygen.create_photo_avatar(open(default_storage.path(image_path),"rb").read(), avatar_name)
+#         else:
+#             avatar_id = ""
+
+#         ap = AvatarProfile.objects.create(
+#             brand_id=brand_id,
+#             avatar_name=avatar_name,
+#             voice_name=voice_name,
+#             elevenlabs_voice_id=eleven_id,
+#             heygen_avatar_id=avatar_id,
+#             image=image_path
+#         )
+#         return redirect("script-form")
+#     return render(request, "avatar_form.html", ctx)
+
+
+# class ParagraphAPI(APIView):
+#     def post(self, request):
+#         icon = request.data.get("icon") or request.POST.get("icon")
+#         notes = request.data.get("notes") or request.POST.get("notes", "")
+#         if not icon:
+#             return Response({"error": "icon is required"}, status=status.HTTP_400_BAD_REQUEST)
+#         paragraph = generate_heritage_paragraph(
+#             icon, notes
+#         )
+#         return Response({"icon": icon, "paragraph": paragraph}, status=status.HTTP_200_OK)
     
 
 
@@ -211,30 +210,66 @@ def script_avatar_page(request):
 
 
 # AJAX helpers
-def heygen_avatars_api(request):
-    return JsonResponse({"avatars": avatar_heygen.list_avatars()})
+# def heygen_avatars_api(request):
+#     return JsonResponse({"avatars": avatar_heygen.list_avatars()})
 
 
-def heygen_voices_api(request):
-    return JsonResponse({"voices": avatar_heygen.list_voices()})
+# def heygen_voices_api(request):
+#     return JsonResponse({"voices": avatar_heygen.list_voices()})
 
 
-def icon_meta_api(request, pk: int):
-    icon = get_object_or_404(Icon, pk=pk)
-    return JsonResponse({"category": getattr(icon, "category", ""), "notes": getattr(icon, "short_cues", "")})
+# def icon_meta_api(request, pk: int):
+#     icon = get_object_or_404(Icon, pk=pk)
+#     return JsonResponse({"category": getattr(icon, "category", ""), "notes": getattr(icon, "short_cues", "")})
 
 
 # Paragraph generator API (used by the left-side button)
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+
 
 class ParagraphAPI(APIView):
     def post(self, request):
-        icon = request.data.get("icon") or request.POST.get("icon")
-        notes = request.data.get("notes") or request.POST.get("notes", "")
+        icon = request.data.get("icon", "")
+        notes = request.data.get("notes", "")
         if not icon:
-            return Response({"error": "icon is required"}, status=status.HTTP_400_BAD_REQUEST)
-        paragraph = generate_heritage_paragraph(icon, notes)
-        return Response({"icon": icon, "paragraph": paragraph}, status=status.HTTP_200_OK)
+            return Response({"error": "No icon provided"}, status=status.HTTP_400_BAD_REQUEST)
+        # Compose a prompt that asks for both plain paragraph and SSML
+        prompt = f"""
+            You are a senior fashion copywriter AND an SSML engineer.
+            GOAL
+            1) Write ONE documentary-style brand paragraph (120–180 words) about {icon}.
+            - Weave in these notes naturally: {notes}
+            - Concrete visuals (fit, fabric, color mood, scene); present tense; no hype, emojis, or markdown.
+            - Include one subtle styling suggestion.
+            - End with a calm, confident closing line.
+
+            2) Convert that paragraph into VALID, production-ready SSML (ElevenLabs-compatible).
+
+            SSML RULES
+            - Output ONE <speak> block only (no XML declaration, no code fences, no comments).
+            - Wrap content in <prosody rate="medium"> … </prosody>.
+            - Use <break> between 120–500ms at natural beats.
+            - Use <emphasis level="moderate"> on up to 3 short phrases.
+            - Convert years to <say-as interpret-as="date" format="y">YYYY</say-as>.
+            - Convert standalone integers to <say-as interpret-as="cardinal">N</say-as> when helpful.
+            - Escape special characters (&, <, >, ").
+            - End with <mark name="END"/> right before </speak>.
+            - No vendor-specific or <audio> tags.
+
+            OUTPUT FORMAT
+            Return ONLY a single JSON object (no extra text, no markdown), strictly valid and double-quoted:
+            {{
+            "paragraph": "string — the plain text paragraph (120–180 words).",
+            "ssml": "<speak>…</speak>"
+            }}
+            """
+
+        # Call OpenAI once
+        import json
+        response = call_openai_for_ssml(prompt)
+        try:
+            data = json.loads(response)
+            return Response({"paragraph": data.get("paragraph", ""), "ssml": data.get("ssml", "")})
+        except Exception:
+            # fallback: just return the text as paragraph
+            return Response({"paragraph": response, "ssml": ""})
 

@@ -8,6 +8,36 @@ def word_range(duration: str):
 def llm_chat(system, user, temp=0.5):
     return llm_openai.chat(system, user, temp)
 
+def call_openai_for_ssml(prompt):
+    """
+    Calls OpenAI's API via llm_openai.chat to convert text to SSML format.
+    Returns the SSML string.
+    """
+    system = """You are an assistant that converts plain text into VALID, production-ready SSML for speech synthesis (ElevenLabs-compatible).Hard requirements:
+    - Return ONE <speak> block ONLY. No code fences, no explanations, no XML declaration.
+    - Use <prosody rate="medium"> for the wrapper unless specified.
+    - Use <break> with milliseconds (120–500ms) to create natural pacing between beats.
+    - Use <emphasis level="moderate"> to highlight 1–3 key phrases only.
+    - Convert years to <say-as interpret-as="date" format="y">YYYY</say-as> and integers to <say-as interpret-as="cardinal">N</say-as> where appropriate.
+    - Keep sentences 8–22 words for rhythm. Vary lengths slightly.
+    - Do NOT invent content; preserve meaning and order. Lightly segment long sentences for clarity.
+    - Escape special characters (&, <, >) if present in the input.
+    - End with <mark name="END"/> just before closing </speak>.
+    - No <audio> tags, no SSML comments, no vendor-specific tags.
+
+    Voice guidance (implicit, do not output as text):
+    - Tone: modern, confident, understated.
+    - Diction: clean and warm; avoid hype.
+
+    If the input already contains SSML, rebuild it into a single clean, standards-compliant block following the same rules.
+    """
+    user = prompt
+    try:
+        ssml = llm_openai.chat(system, user, temperature=0.2)
+        return ssml
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 def count_words(t): return len(re.findall(r"\b[\w’']+\b", t))
 def first_sentence(t):
     parts = re.split(r"(?<=[.!?])\s+", t.strip(), 1)

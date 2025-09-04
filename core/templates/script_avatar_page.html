@@ -35,11 +35,23 @@
       </div>
 
       <button type="button" id="btn-generate" style="margin-top:12px">Generate Paragraph</button>
-
       <h4 style="margin-top:16px">Paragraph Preview</h4>
       <textarea id="paragraph" rows="10" style="width:100%" readonly>{{ paragraph }}</textarea>
 
+
+<h4 style="margin-top:16px">SSML Output</h4>
+<textarea id="ssml-output" rows="10" style="width:100%" readonly></textarea>
+
       <input type="hidden" name="action" id="action-field" value="">
+      <button type="button" id="btn-voice" style="margin-top:12px" disabled>
+  Generate Voice (ElevenLabs)
+</button>
+
+<audio id="voice-audio" controls style="display:none; width:100%; margin-top:8px;"></audio>
+<a id="voice-download" href="#" download="voice.mp3" style="display:none; margin-top:6px; display:inline-block;">
+  Download Audio
+</a>
+
     </div>
 
     <!-- RIGHT: HeyGen picks + submit -->
@@ -95,6 +107,8 @@
   // Generate paragraph via API
   const btnGen = document.getElementById("btn-generate");
   const paraBox = document.getElementById("paragraph");
+  const ssmlBox = document.getElementById("ssml-output");
+
   btnGen.addEventListener("click", async () => {
     const iconText = iconSelect.options[iconSelect.selectedIndex]?.text || "";
     const notes = notesInput.value || "";
@@ -105,6 +119,7 @@
     });
     const j = await r.json();
     paraBox.value = j.paragraph || "";
+    ssmlBox.value = j.ssml || "";
   });
 
   // Populate HeyGen avatars/voices

@@ -284,7 +284,7 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
 @shared_task
 def task_kickoff_chain(sr_id: int):
     flow = chain(
-        task_generate_script.si(sr_id),
+        # task_generate_script.si(sr_id),
         task_render_avatar.si(sr_id),
         task_assemble_template.si(sr_id),
         task_push_drive.si(sr_id),
