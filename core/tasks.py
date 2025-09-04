@@ -177,62 +177,95 @@ def task_metrics_24h(sr_id: int):
     sr.save()
     return perf
 
-# core/tasks.py
-
-from celery import shared_task
-from requests import HTTPError
+from requests.exceptions import HTTPError
 from django.utils import timezone
-from .models import ScriptRequest
-from .utils import generate_heritage_paragraph
-from .adapters import avatar_heygen, tts_elevenlabs
+from celery import shared_task
+from core.models import ScriptRequest
+from core.adapters import avatar_heygen, tts_elevenlabs
+
+
+def _resolve_character_and_voice(chosen_id: str, provided_voice_id: str | None):
+    """
+    Return (character_type, look_id, voice_id).
+    - character_type: "talking_photo" for motion looks, "avatar" for photo looks
+    - look_id: the exact id to send to HeyGen (avatar_id or talking_photo_id)
+    - voice_id: provided one or the look's default
+    We try to match the chosen_id against known looks; if it is a group id, we
+    pick a look (prefer motion if available).
+    """
+    # 1) try to match chosen_id as a known look
+    all_looks_list = avatar_heygen.list_avatars()
+    all_looks = {a.get("id") or a.get("avatar_id"): a for a in all_looks_list}
+    look = all_looks.get(chosen_id)
+
+    if look:
+        is_motion = bool(look.get("is_motion"))
+        ctype = "talking_photo" if is_motion else "avatar"
+        v_id = provided_voice_id or look.get("default_voice_id") or None
+        # prefer explicit avatar_id if present
+        look_id = look.get("avatar_id") or look.get("id") or chosen_id
+        return ctype, look_id, v_id
 
 @shared_task
 def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id: str | None = None):
     """
     Render via HeyGen using TTS first; if HeyGen rejects, fall back to audio pipeline.
-    Ensures we always send a LOOK avatar_id (not a group_id).
+    Automatically chooses avatar vs talking_photo based on the selected look.
     """
     sr = ScriptRequest.objects.get(id=sr_id)
 
     # Ensure we have text
     if not sr.final_script:
-        sr.final_script = generate_heritage_paragraph(sr.icon_or_topic, sr.notes or "")
+        sr.final_script = avatar_heygen.generate_heritage_paragraph(sr.icon_or_topic, sr.notes or "")
         sr.status = "Drafted"
         sr.save()
 
-    # 1) Resolve group -> first look (renderable) and pick a voice if needed
-    look_avatar_id = avatar_or_group_id
-    picked_voice = heygen_voice_id
-    print("[TASK] incoming avatar_or_group_id:", avatar_or_group_id)
-    print("[TASK] resolved look_avatar_id:", look_avatar_id, "picked_voice:", picked_voice)
+    # Decide character type + final look id + voice
+    character_type, look_id, picked_voice = _resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
+    print("type", character_type)
 
-    # 2) Try TTS path
+    # --- Try TTS path first ---
     try:
-        video_id = avatar_heygen.create_avatar_video_from_text(
-            avatar_id=look_avatar_id,
-            input_text=sr.final_script,
-            voice_id=picked_voice,            # may be None; adapter handles omission
-            title=f"{sr.icon_or_topic} · req#{sr.id}",
-            width=1080, height=1920,
-            # accept_group_id False because we've resolved to a look already
-            accept_group_id=False,
-        )
+        if character_type == "avatar":
+            video_id = avatar_heygen.create_avatar_video_from_text(
+                avatar_id=look_id,
+                input_text=sr.final_script,
+                voice_id=picked_voice,
+                title=f"{sr.icon_or_topic} · req#{sr.id}",
+                width=1080, height=1920,
+                accept_group_id=False,   # already resolved to a look id
+            )
+        else:
+            video_id = avatar_heygen.create_talking_photo_video_from_text(
+                talking_photo_id=look_id,
+                input_text=sr.final_script,
+                voice_id=picked_voice,
+                title=f"{sr.icon_or_topic} · req#{sr.id}",
+                width=1080, height=1920,
+            )
     except HTTPError as e:
-        # 3) Fallback: synthesize audio with ElevenLabs -> upload -> render via audio_asset_id
-        print("[TASK] TTS failed, falling back to audio. Reason:", str(e))
-        # If your ScriptRequest.avatar has an ElevenLabs id, prefer that; otherwise continue without (ElevenLabs default/mapped)
+        # --- Fallback: ElevenLabs TTS -> upload audio -> render via audio asset ---
         el_voice = getattr(sr.avatar, "elevenlabs_voice_id", None)
-        mp3_bytes = tts_elevenlabs.synthesize_bytes(sr.final_script, el_voice)
+        mp3_bytes = tts_elevenlabs.synthesize_tts_bytes(sr.final_script, el_voice)  # see adapter change below
         audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes)
-        video_id = avatar_heygen.create_avatar_video_from_audio(
-            avatar_id=look_avatar_id,
-            audio_asset_id=audio_asset_id,
-            title=f"{sr.icon_or_topic} · req#{sr.id}",
-            width=1080, height=1920,
-            accept_group_id=False,
-        )
 
-    # 4) Wait and persist
+        if character_type == "avatar":
+            video_id = avatar_heygen.create_avatar_video_from_audio(
+                avatar_id=look_id,
+                audio_asset_id=audio_asset_id,
+                title=f"{sr.icon_or_topic} · req#{sr.id}",
+                width=1080, height=1920,
+                accept_group_id=False,
+            )
+        else:
+            video_id = avatar_heygen.create_talking_photo_video_from_audio(
+                talking_photo_id=look_id,
+                audio_asset_id=audio_asset_id,
+                title=f"{sr.icon_or_topic} · req#{sr.id}",
+                width=1080, height=1920,
+            )
+
+    # Wait and persist
     st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
     if st.get("status") != "completed":
         sr.status = "Assembling"

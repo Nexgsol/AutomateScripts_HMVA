@@ -60,3 +60,13 @@ def synthesize_bytes(
         print("[ElevenLabs ERROR body]", body)
         r.raise_for_status()
     return r.content
+
+
+def synthesize_tts_bytes(text: str, voice_id: str | None) -> bytes:
+    """
+    Return MP3 bytes for the provided text with ElevenLabs.
+    Your previous function was likely named `synthesize_bytes`; rename or alias it.
+    """
+    mp3_bytes = synthesize_bytes(text, voice_id=voice_id)
+    return mp3_bytes
+  

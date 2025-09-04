@@ -52,108 +52,6 @@ def _json_post(url: str, payload: Dict[str, Any], timeout: int = 180) -> Dict[st
     return r.json() or {}
 
 
-# -------------------- list avatars (looks & groups) --------------------
-
-def list_group_looks(group_id: str) -> List[Dict[str, Any]]:
-    """
-    GET /v2/avatar_group/{group_id}/avatars
-    Normalizes to items that have a concrete renderable avatar_id.
-    """
-    if not (HEYGEN_API_KEY and group_id):
-        return []
-    url = f"{API_BASE}/v2/avatar_group/{group_id}/avatars"
-    j = _json_get(url)
-    data = j.get("data") or {}
-    looks = data.get("avatar_list") or []
-    out: List[Dict[str, Any]] = []
-    for a in looks:
-        out.append({
-            "avatar_id": a.get("id", ""),
-            "name": a.get("name", ""),
-            "preview_image": a.get("motion_preview_url") or a.get("image_url") or "",
-            "image_url": a.get("image_url", ""),
-            "motion_preview_url": a.get("motion_preview_url", ""),
-            "group_id": a.get("group_id", group_id),
-            "is_motion": bool(a.get("is_motion")),
-            "default_voice_id": a.get("default_voice_id", ""),
-            "created_at": a.get("created_at"),
-        })
-    return out
-
-def list_avatars(include_public: bool = False, group_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """
-    Always return renderable LOOK avatars (avatar_id), flattened across groups.
-
-    [
-      {
-        "type": "look",
-        "id": "<avatar_id>",
-        "avatar_id": "<avatar_id>",
-        "name": "...",
-        "preview_image": "...",
-        "group_id": "<group_id>",
-        "is_motion": true/false,
-        "default_voice_id": "..."
-      }, ...
-    ]
-    """
-    if not HEYGEN_API_KEY:
-        return []
-
-    # First call: list groups (and capture any tenants that already include avatar_list at top level)
-    j = _json_get(f"{API_BASE}/v2/avatar_group.list", params={"include_public": str(include_public).lower()})
-    data = j.get("data") or {}
-
-    def _norm_from_direct(a: Dict[str, Any]) -> Dict[str, Any]:
-        # Some tenants place looks directly on avatar_group.list -> data.avatar_list
-        return {
-            "type": "look",
-            "id": a.get("id", ""),
-            "avatar_id": a.get("id", ""),
-            "name": a.get("name", ""),
-            "preview_image": a.get("motion_preview_url") or a.get("image_url") or "",
-            "group_id": a.get("group_id", ""),
-            "is_motion": bool(a.get("is_motion")),
-            "default_voice_id": a.get("default_voice_id", ""),
-        }
-
-    out: List[Dict[str, Any]] = []
-    seen: set = set()
-
-    # If direct looks are present, include them
-    direct_looks = data.get("avatar_list") or []
-    for a in direct_looks:
-        vid = a.get("id", "")
-        if vid and vid not in seen:
-            out.append(_norm_from_direct(a))
-            seen.add(vid)
-
-    # Determine which groups to expand
-    groups_src = group_ids if group_ids is not None else [
-        g.get("id", "") for g in (data.get("avatar_group_list") or []) if g.get("id")
-    ]
-
-    # Expand each group into its looks and append
-    for gid in groups_src:
-        looks = list_group_looks(gid)
-        for lk in looks:
-            vid = lk.get("avatar_id", "")
-            if not vid or vid in seen:
-                continue
-            out.append({
-                "type": "look",
-                "id": vid,
-                "avatar_id": vid,
-                "name": lk.get("name", ""),
-                "preview_image": lk.get("preview_image", "") or lk.get("image_url", ""),
-                "group_id": lk.get("group_id", gid),
-                "is_motion": bool(lk.get("is_motion")),
-                "default_voice_id": lk.get("default_voice_id", ""),
-            })
-            seen.add(vid)
-
-    return out
-# -------------------- list voices --------------------
 
 def list_voices() -> List[Dict[str, Any]]:
     """
@@ -183,56 +81,201 @@ def list_voices() -> List[Dict[str, Any]]:
     return out
 
 
-# -------------------- group → looks (renderable avatar_id) --------------------
+# -------- LIST ALL LOOKS (flattened) --------
 
-def get_avatar_group(group_id: str) -> Dict[str, Any]:
+def list_group_looks(group_id: str) -> List[Dict[str, Any]]:
     """
-    Builds a lightweight group summary by filtering /v2/avatar_group.list (look-level).
+    GET /v2/avatar_group/<group_id>/avatars
+    Normalizes each look:
+    {
+      "avatar_id": "...",
+      "name": "...",
+      "preview_image": "...",
+      "group_id": "...",
+      "is_motion": bool,
+      "default_voice_id": "..."
+    }
     """
     if not HEYGEN_API_KEY:
-        return {}
+        return []
+    url = f"{API_BASE}/v2/avatar_group/{group_id}/avatars"
+    try:
+        j = _json_get(url)
+    except Exception:
+        return []
+    items = (j.get("data") or {}).get("avatar_list") or []
+    out: List[Dict[str, Any]] = []
+    for a in items:
+        out.append({
+            "avatar_id": a.get("id", ""),
+            "name": a.get("name", ""),
+            "preview_image": a.get("motion_preview_url") or a.get("image_url") or "",
+            "group_id": a.get("group_id", group_id),
+            "is_motion": bool(a.get("is_motion")),
+            "default_voice_id": a.get("default_voice_id", ""),
+        })
+    return out
 
-    url = f"{API_BASE}/v2/avatar_group.list"
-    j = _json_get(url, params={"include_public": "false"}) or {}
+
+def list_avatars(include_public: bool = False, group_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    Always return renderable LOOK avatars (avatar_id), flattened across groups.
+    """
+    if not HEYGEN_API_KEY:
+        return []
+
+    j = _json_get(f"{API_BASE}/v2/avatar_group.list", params={"include_public": str(include_public).lower()})
     data = j.get("data") or {}
-    all_looks = data.get("avatar_list") or []
 
-    looks = [a for a in all_looks if a.get("group_id") == group_id]
-    if not looks:
-        return {"id": group_id, "looks_count": 0}
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
 
-    first = looks[0]
-    preview_image = first.get("motion_preview_url") or first.get("image_url") or ""
-    # Prefer the first look’s default voice (simple, predictable)
-    default_voice_id = first.get("default_voice_id") or None
+    # Some tenants expose looks directly here
+    direct = data.get("avatar_list") or []
+    for a in direct:
+        vid = a.get("id")
+        if not vid or vid in seen:
+            continue
+        out.append({
+            "type": "look",
+            "id": vid,
+            "avatar_id": vid,
+            "name": a.get("name", ""),
+            "preview_image": a.get("motion_preview_url") or a.get("image_url") or "",
+            "group_id": a.get("group_id", ""),
+            "is_motion": bool(a.get("is_motion")),
+            "default_voice_id": a.get("default_voice_id", ""),
+        })
+        seen.add(vid)
 
-    return {
-        "id": group_id,
-        "looks_count": len(looks),
-        "preview_image": preview_image,
-        "default_voice_id": default_voice_id,
-        "name": first.get("name", ""),
+    # Otherwise expand groups -> looks
+    groups_src = group_ids if group_ids is not None else [
+        g.get("id", "") for g in (data.get("avatar_group_list") or []) if g.get("id")
+    ]
+    for gid in groups_src:
+        for lk in list_group_looks(gid):
+            vid = lk.get("avatar_id", "")
+            if not vid or vid in seen:
+                continue
+            out.append({
+                "type": "look",
+                "id": vid,
+                "avatar_id": vid,
+                "name": lk.get("name", ""),
+                "preview_image": lk.get("preview_image", ""),
+                "group_id": lk.get("group_id", gid),
+                "is_motion": bool(lk.get("is_motion")),
+                "default_voice_id": lk.get("default_voice_id", ""),
+            })
+            seen.add(vid)
+
+    return out
+
+# -------- VIDEO CREATION HELPERS --------
+
+def create_avatar_video_from_text(*, avatar_id: str, input_text: str, voice_id: Optional[str] = None,
+                                  title: str = "", width: int = 1080, height: int = 1920,
+                                  background_color: str = "#000000", accept_group_id: bool = False) -> str:
+    """
+    Motion avatar (character.type='avatar')
+    """
+    # Note: accept_group_id kept for backward compat; if True, resolve to first look
+    if accept_group_id and len(avatar_id) == 32:  # crude: group ids are often 32 hex chars
+        looks = list_group_looks(avatar_id)
+        if looks:
+            avatar_id = looks[0]["avatar_id"]
+
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
+                "voice": {"type": "text", "input_text": input_text, "voice_id": voice_id} if input_text else None,
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
     }
+    # remove None voice if ever called with empty input_text
+    if payload["video_inputs"][0]["voice"] is None:
+        del payload["video_inputs"][0]["voice"]
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
 
 
+def create_avatar_video_from_audio(*, avatar_id: str, audio_asset_id: str,
+                                   title: str = "", width: int = 1080, height: int = 1920,
+                                   background_color: str = "#000000", accept_group_id: bool = False) -> str:
+    if accept_group_id and len(avatar_id) == 32:
+        looks = list_group_looks(avatar_id)
+        if looks:
+            avatar_id = looks[0]["avatar_id"]
+
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
+                "voice": {"type": "audio", "audio_asset_id": audio_asset_id},
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
+    }
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
 
 
-def resolve_avatar_id(group_or_avatar_id: str) -> Tuple[str, Optional[str]]:
+def create_talking_photo_video_from_text(*, talking_photo_id: str, input_text: str, voice_id: Optional[str] = None,
+                                         title: str = "", width: int = 1080, height: int = 1920,
+                                         background_color: str = "#000000") -> str:
     """
-    Accepts either a look avatar_id (returns it) OR a group_id (returns first look's avatar_id).
-    Returns (avatar_id, default_voice_id).
+    Photo look (character.type='talking_photo')
     """
-    if not group_or_avatar_id:
-        return "", None
-    looks = list_group_looks(group_or_avatar_id)
-    if looks:
-        first = looks[0]
-        return first.get("avatar_id", ""), first.get("default_voice_id") or None
-    # assume already a look id
-    return group_or_avatar_id, None
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
+                "voice": {"type": "text", "input_text": input_text, "voice_id": voice_id},
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
+    }
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
 
 
-# -------------------- audio upload --------------------
+def create_talking_photo_video_from_audio(*, talking_photo_id: str, audio_asset_id: str,
+                                          title: str = "", width: int = 1080, height: int = 1920,
+                                          background_color: str = "#000000") -> str:
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
+                "voice": {"type": "audio", "audio_asset_id": audio_asset_id},
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
+    }
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
+
 
 def upload_audio_asset(mp3_bytes: bytes) -> str:
     if not HEYGEN_API_KEY:
