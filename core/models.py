@@ -95,3 +95,13 @@ class ScriptRequest(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self): return f"{self.brand} · {self.icon_or_topic} [{self.status}]"
+
+    # add near your other models
+class Icon(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+    category = models.CharField(max_length=100, blank=True)
+    short_cues = models.TextField(blank=True)  # notes
+
+    def __str__(self):
+        return self.name
+

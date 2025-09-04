@@ -1,59 +1,70 @@
 version: "3.9"
+
 services:
   web:
     build: .
-    command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    ports: [ "8000:8000" ]
-    environment:
-      DJANGO_SECRET_KEY: change-me
-      DJANGO_DEBUG: "1"
-      OPENAI_API_KEY: ""
-      OPENAI_MODEL: "gpt-4o-mini"
-      TIMEZONE: "America/New_York"
-      REDIS_URL: "redis://redis:6379/0"
-      HEYGEN_API_KEY: ""
-      ELEVENLABS_API_KEY: ""
-      GDRIVE_SERVICE_ACCOUNT_JSON: ""
-      GDRIVE_FOLDER_ID: ""
-      AIRTABLE_TOKEN: ""
-      AIRTABLE_BASE_ID: ""
-      AIRTABLE_TABLE: "Requests"
-    depends_on: [ redis ]
+    command: bash -lc "python manage.py makemigrations && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    ports: ["8000:8000"]
+    env_file: [.env]
+    volumes:
+      - .:/app
+      - media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker:
     build: .
     command: celery -A hmva worker --loglevel=INFO
-    environment:
-      DJANGO_SECRET_KEY: change-me
-      DJANGO_DEBUG: "1"
-      OPENAI_API_KEY: ""
-      OPENAI_MODEL: "gpt-4o-mini"
-      TIMEZONE: "America/New_York"
-      REDIS_URL: "redis://redis:6379/0"
-      HEYGEN_API_KEY: ""
-      ELEVENLABS_API_KEY: ""
-      GDRIVE_SERVICE_ACCOUNT_JSON: ""
-      GDRIVE_FOLDER_ID: ""
-      AIRTABLE_TOKEN: ""
-      AIRTABLE_BASE_ID: ""
-      AIRTABLE_TABLE: "Requests"
-    depends_on: [ redis, web ]
+    env_file: [.env]
+    volumes:
+      - .:/app
+      - media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
   beat:
     build: .
     command: celery -A hmva beat --loglevel=INFO
-    environment:
-      DJANGO_SECRET_KEY: change-me
-      DJANGO_DEBUG: "1"
-      OPENAI_API_KEY: ""
-      OPENAI_MODEL: "gpt-4o-mini"
-      TIMEZONE: "America/New_York"
-      REDIS_URL: "redis://redis:6379/0"
-      HEYGEN_API_KEY: ""
-      ELEVENLABS_API_KEY: ""
-      GDRIVE_SERVICE_ACCOUNT_JSON: ""
-      GDRIVE_FOLDER_ID: ""
-      AIRTABLE_TOKEN: ""
-      AIRTABLE_BASE_ID: ""
-      AIRTABLE_TABLE: "Requests"
-    depends_on: [ redis, web ]
+    env_file: [.env]
+    volumes:
+      - .:/app
+      - media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  flower:
+    image: mher/flower:2.0.1
+    command: ["celery", "--broker=redis://redis:6379/0", "flower", "--address=0.0.0.0", "--port=5555"]
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+
+
+
   redis:
     image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+
+volumes:
+  media:
+  redisdata:

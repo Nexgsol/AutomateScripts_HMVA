@@ -1,29 +1,62 @@
+# core/adapters/tts_elevenlabs.py
+from __future__ import annotations
 import os, requests
-import json
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVEN_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+from typing import Optional, Dict, Any
 
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 
-def list_history(page_size: int = 50) -> dict:
-    if not ELEVEN_API_KEY:
+DEFAULT_VOICE_ID = os.getenv("ELEVENLABS_DEFAULT_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # public sample voice
+DEFAULT_MODEL_ID = os.getenv("ELEVENLABS_MODEL_ID", "eleven_monolingual_v1")
+
+def _headers() -> Dict[str, str]:
+    if not ELEVENLABS_API_KEY:
         return {}
-    url = f"https://api.elevenlabs.io/v1/history?per_page={page_size}"
-    r = requests.get(url, headers={"xi-api-key": ELEVEN_API_KEY}, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    return {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "accept": "audio/mpeg",
+        "content-type": "application/json",
+    }
 
-
-def find_history_item_id(voice_id: str, text: str, page_size: int = 50) -> str:
+def synthesize_bytes(
+    text: str,
+    voice_id: Optional[str] = None,
+    *,
+    model_id: Optional[str] = None,
+    stability: float = 0.35,
+    similarity_boost: float = 0.75,
+    style: float = 0.0,
+    use_speaker_boost: bool = True,
+) -> bytes:
     """
-    Best-effort: scan recent history and try to match by voice_id and text snippet.
+    Returns MP3 bytes from ElevenLabs TTS. Raises on error.
     """
-    data = list_history(page_size)
-    items = data.get("history") or data.get("items") or []
-    key = (text or "").strip()[:60]
-    for it in items:
-        if str(it.get("voice_id")) == str(voice_id):
-            t = it.get("text") or ""
-            if key and key in t:
-                return it.get("history_item_id") or it.get("id") or ""
-    return ""
+    if not text:
+        raise ValueError("text is required")
+    vid = voice_id or DEFAULT_VOICE_ID
+    mid = model_id or DEFAULT_MODEL_ID
 
+    if not ELEVENLABS_API_KEY:
+        # Dev stub: small silent mp3 blob would be ideal; instead, fail loudly
+        raise RuntimeError("ELEVENLABS_API_KEY not set")
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
+    payload = {
+        "text": text,
+        "model_id": mid,
+        "voice_settings": {
+            "stability": stability,
+            "similarity_boost": similarity_boost,
+            "style": style,
+            "use_speaker_boost": use_speaker_boost,
+        },
+    }
+    r = requests.post(url, headers=_headers(), json=payload, timeout=180)
+    if r.status_code >= 400:
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        print("[ElevenLabs ERROR]", r.status_code, url)
+        print("[ElevenLabs ERROR body]", body)
+        r.raise_for_status()
+    return r.content

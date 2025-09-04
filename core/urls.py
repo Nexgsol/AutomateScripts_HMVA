@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-  avatar_quick_create, script_form, request_detail, ScriptGenerateAPI, ScriptGetAPI,
+  ParagraphAPI, avatar_quick_create, heygen_avatars_api, heygen_voices_api, icon_meta_api, script_avatar_page, script_avatar_page, script_form, request_detail, ScriptGenerateAPI, ScriptGetAPI,
   RenderAvatarAPI, AssembleAPI, DriveAPI, CaptionsAPI, AirtableSyncAPI,
   ScheduleAPI, PublishAPI, MetricsAPI
 )
@@ -19,4 +19,12 @@ urlpatterns = [
     path("v1/requests/<int:pk>/publish", PublishAPI.as_view()),
     path("v1/requests/<int:pk>/metrics24h", MetricsAPI.as_view()),
     path("avatar/new/", avatar_quick_create, name="avatar-new"),
+    path("api/v1/paragraph", ParagraphAPI.as_view(), name="paragraph-api"),
+
+
+    path("studio/", script_avatar_page, name="script-avatar"),
+    path("api/heygen/avatars", heygen_avatars_api, name="heygen-avatars"),
+    path("api/heygen/voices", heygen_voices_api, name="heygen-voices"),
+    path("api/icons/<int:pk>/meta", icon_meta_api, name="icon-meta"),
+    
 ]

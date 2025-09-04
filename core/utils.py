@@ -43,3 +43,41 @@ def next_post_slot(brand_timezone: str, post_windows_csv: str):
         h, m = map(int, windows[0].split(":"))
         slot = (now + datetime.timedelta(days=1)).replace(hour=h, minute=m, second=0, microsecond=0)
     return slot.strftime("%H:%M"), slot
+
+
+# core/utils.py (append at bottom or near your other llm helpers)
+import re
+
+def generate_heritage_paragraph(icon_name: str, notes: str) -> str:
+    """
+    Generates a single 100–130 word paragraph per the Instructional Notes.
+    Uses llm_chat(BASE_SCRIPT_SYSTEM, base_script_user, temperature=0.5).
+    Enforces 'single paragraph' and trims stray newlines/spaces.
+    """
+    from .prompts import BASE_SCRIPT_SYSTEM, base_script_user
+
+    raw = llm_chat(BASE_SCRIPT_SYSTEM, base_script_user(icon_name, notes), temp=0.5)
+
+    # normalize whitespace to keep one paragraph
+    text = raw.strip()
+    # Replace hard newlines with spaces; collapse multiple spaces
+    text = re.sub(r'\s*\n+\s*', ' ', text)
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+
+    # Guard: if it somehow produced multiple paragraphs, squash to one
+    parts = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+    if len(parts) > 1:
+        text = ' '.join(parts)
+
+    # (Optional) hard length nudge: if outside 100–130 words, ask model to tighten/expand once.
+    words = len(text.split())
+    if words < 100 or words > 130:
+        fix_prompt = (
+            f"Rewrite to a single flowing paragraph of 100 to 130 words, keep meaning and all six beats, "
+            f"no emojis, no em dashes, standard punctuation only. Icon: {icon_name}. Notes: {notes}. "
+            f"ORIGINAL:\n{text}\n\nReturn only the corrected paragraph."
+        )
+        text = llm_chat("You are a precise editor.", fix_prompt, temp=0.3).strip()
+        text = re.sub(r'\s*\n+\s*', ' ', text)
+        text = re.sub(r'\s{2,}', ' ', text).strip()
+    return text

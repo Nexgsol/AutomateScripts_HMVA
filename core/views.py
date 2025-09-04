@@ -1,4 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
+from core.utils import generate_heritage_paragraph
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -141,3 +142,99 @@ def avatar_quick_create(request):
         )
         return redirect("script-form")
     return render(request, "avatar_form.html", ctx)
+
+
+class ParagraphAPI(APIView):
+    def post(self, request):
+        icon = request.data.get("icon") or request.POST.get("icon")
+        notes = request.data.get("notes") or request.POST.get("notes", "")
+        if not icon:
+            return Response({"error": "icon is required"}, status=status.HTTP_400_BAD_REQUEST)
+        paragraph = generate_heritage_paragraph(
+            icon, notes
+        )
+        return Response({"icon": icon, "paragraph": paragraph}, status=status.HTTP_200_OK)
+    
+
+
+
+
+    from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
+from django.http import JsonResponse
+from .forms import ScriptAvatarForm
+from .models import Icon, ScriptRequest
+from .utils import generate_heritage_paragraph
+from .adapters import avatar_heygen
+from .tasks import task_render_heygen_tts
+
+@require_http_methods(["GET", "POST"])
+def script_avatar_page(request):
+    paragraph = ""
+    if request.method == "POST":
+        form = ScriptAvatarForm(request.POST)
+        action = request.POST.get("action", "")
+        if form.is_valid():
+            icon_obj = form.cleaned_data["icon"]
+            brand = form.cleaned_data["brand"]
+            duration = form.cleaned_data["duration"]
+            category = form.cleaned_data["category"] or (icon_obj.category if hasattr(icon_obj, "category") else "")
+            notes = form.cleaned_data["notes"] or (getattr(icon_obj, "short_cues", "") or "")
+
+            # Always refresh paragraph so both actions work
+            paragraph = generate_heritage_paragraph(icon_obj.name, notes)
+
+            if action == "generate_video":
+                heygen_avatar_id = form.cleaned_data["heygen_avatar_id"]
+                heygen_voice_id  = form.cleaned_data["heygen_voice_id"] or None
+                if not heygen_avatar_id:
+                    messages.error(request, "Please select a HeyGen avatar.")
+                else:
+                    sr = ScriptRequest.objects.create(
+                        brand=brand, mode="Single",
+                        icon_or_topic=icon_obj.name,
+                        notes=notes,
+                        duration=duration,
+                        draft_script=paragraph,
+                        final_script=paragraph,
+                        status="Drafted",
+                    )
+                    task_render_heygen_tts.delay(sr.id, heygen_avatar_id, heygen_voice_id)
+                    messages.success(request, f"Video render queued for {icon_obj.name}.")
+                    # change 'request-detail' to your actual detail route name if different
+                    return redirect("request-detail", pk=sr.id)
+    else:
+        form = ScriptAvatarForm()
+
+    return render(request, "script_avatar_page.html", {"form": form, "paragraph": paragraph})
+
+
+# AJAX helpers
+def heygen_avatars_api(request):
+    return JsonResponse({"avatars": avatar_heygen.list_avatars()})
+
+
+def heygen_voices_api(request):
+    return JsonResponse({"voices": avatar_heygen.list_voices()})
+
+
+def icon_meta_api(request, pk: int):
+    icon = get_object_or_404(Icon, pk=pk)
+    return JsonResponse({"category": getattr(icon, "category", ""), "notes": getattr(icon, "short_cues", "")})
+
+
+# Paragraph generator API (used by the left-side button)
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+class ParagraphAPI(APIView):
+    def post(self, request):
+        icon = request.data.get("icon") or request.POST.get("icon")
+        notes = request.data.get("notes") or request.POST.get("notes", "")
+        if not icon:
+            return Response({"error": "icon is required"}, status=status.HTTP_400_BAD_REQUEST)
+        paragraph = generate_heritage_paragraph(icon, notes)
+        return Response({"icon": icon, "paragraph": paragraph}, status=status.HTTP_200_OK)
+

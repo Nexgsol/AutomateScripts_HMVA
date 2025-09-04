@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Studio: Script → HeyGen</h2>
+
+<form method="post" id="studio-form">{% csrf_token %}
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:start;">
+
+    <!-- LEFT: Inputs + Paragraph preview -->
+    <div>
+      <h3>1) Icon & Paragraph</h3>
+
+      <div>
+        <label>{{ form.brand.label }}</label>
+        {{ form.brand }}
+      </div>
+
+      <div style="margin-top:8px">
+        <label>{{ form.icon.label }}</label>
+        {{ form.icon }}
+      </div>
+
+      <div style="margin-top:8px">
+        <label>{{ form.category.label }}</label>
+        {{ form.category }}
+      </div>
+
+      <div style="margin-top:8px">
+        <label>{{ form.notes.label }}</label>
+        {{ form.notes }}
+      </div>
+
+      <div style="margin-top:8px">
+        <label>{{ form.duration.label }}</label>
+        {{ form.duration }}
+      </div>
+
+      <button type="button" id="btn-generate" style="margin-top:12px">Generate Paragraph</button>
+
+      <h4 style="margin-top:16px">Paragraph Preview</h4>
+      <textarea id="paragraph" rows="10" style="width:100%" readonly>{{ paragraph }}</textarea>
+
+      <input type="hidden" name="action" id="action-field" value="">
+    </div>
+
+    <!-- RIGHT: HeyGen picks + submit -->
+    <div>
+      <h3>2) Pick Avatar & Voice (HeyGen)</h3>
+
+      <div>
+        <label>HeyGen Avatar</label>
+        <select id="heygen-avatar-select">
+          <option value="">Loading…</option>
+        </select>
+        <input type="hidden" name="heygen_avatar_id" id="id_heygen_avatar_id"/>
+      </div>
+
+      <div style="margin-top:8px">
+        <label>HeyGen Voice (optional)</label>
+        <select id="heygen-voice-select">
+          <option value="">Loading…</option>
+        </select>
+        <input type="hidden" name="heygen_voice_id" id="id_heygen_voice_id"/>
+      </div>
+
+      <button type="submit"
+              onclick="document.getElementById('action-field').value='generate_video';"
+              style="margin-top:16px">
+        Create Video
+      </button>
+    </div>
+  </div>
+</form>
+
+<script>
+  const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  // Auto-fill category/notes on icon change
+  const iconSelect = document.getElementById("id_icon");
+  const catInput = document.getElementById("id_category");
+  const notesInput = document.getElementById("id_notes");
+
+  async function refreshIconMeta(){
+    const id = iconSelect.value;
+    if(!id){ catInput.value=""; notesInput.value=""; return; }
+    const r = await fetch(`/api/icons/${id}/meta`);
+    const j = await r.json();
+    catInput.value = j.category || "";
+    notesInput.value = j.notes || "";
+  }
+  if (iconSelect) {
+    iconSelect.addEventListener("change", refreshIconMeta);
+    refreshIconMeta();
+  }
+
+  // Generate paragraph via API
+  const btnGen = document.getElementById("btn-generate");
+  const paraBox = document.getElementById("paragraph");
+  btnGen.addEventListener("click", async () => {
+    const iconText = iconSelect.options[iconSelect.selectedIndex]?.text || "";
+    const notes = notesInput.value || "";
+    const r = await fetch("/api/v1/paragraph", {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "X-CSRFToken": csrf},
+      body: JSON.stringify({icon: iconText, notes})
+    });
+    const j = await r.json();
+    paraBox.value = j.paragraph || "";
+  });
+
+  // Populate HeyGen avatars/voices
+  const avSel = document.getElementById("heygen-avatar-select");
+  const voSel = document.getElementById("heygen-voice-select");
+  const avHidden = document.getElementById("id_heygen_avatar_id");
+  const voHidden = document.getElementById("id_heygen_voice_id");
+
+  function setSelOptions(sel, items, idKey, nameKey){
+    sel.innerHTML = '<option value="">Select…</option>';
+    items.forEach(it=>{
+      const opt = document.createElement("option");
+      opt.value = it[idKey] || it["id"] || it["avatar_id"] || "";
+      opt.textContent = it[nameKey] || it["name"] || opt.value;
+      sel.appendChild(opt);
+    });
+  }
+  async function loadHeygen(){
+    try{
+      const a = await (await fetch("/api/heygen/avatars")).json();
+      setSelOptions(avSel, a.avatars || [], "id", "name");
+    }catch(e){ avSel.innerHTML = '<option value="">(no avatars)</option>'; }
+    try{
+      const v = await (await fetch("/api/heygen/voices")).json();
+      setSelOptions(voSel, v.voices || [], "id", "name");
+    }catch(e){ voSel.innerHTML = '<option value="">(no voices)</option>'; }
+  }
+  avSel.addEventListener("change", ()=> avHidden.value = avSel.value);
+  voSel.addEventListener("change", ()=> voHidden.value = voSel.value);
+  loadHeygen();
+</script>
+{% endblock %}

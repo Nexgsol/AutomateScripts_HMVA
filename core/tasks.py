@@ -177,6 +177,76 @@ def task_metrics_24h(sr_id: int):
     sr.save()
     return perf
 
+# core/tasks.py
+
+from celery import shared_task
+from requests import HTTPError
+from django.utils import timezone
+from .models import ScriptRequest
+from .utils import generate_heritage_paragraph
+from .adapters import avatar_heygen, tts_elevenlabs
+
+@shared_task
+def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id: str | None = None):
+    """
+    Render via HeyGen using TTS first; if HeyGen rejects, fall back to audio pipeline.
+    Ensures we always send a LOOK avatar_id (not a group_id).
+    """
+    sr = ScriptRequest.objects.get(id=sr_id)
+
+    # Ensure we have text
+    if not sr.final_script:
+        sr.final_script = generate_heritage_paragraph(sr.icon_or_topic, sr.notes or "")
+        sr.status = "Drafted"
+        sr.save()
+
+    # 1) Resolve group -> first look (renderable) and pick a voice if needed
+    look_avatar_id = avatar_or_group_id
+    picked_voice = heygen_voice_id
+    print("[TASK] incoming avatar_or_group_id:", avatar_or_group_id)
+    print("[TASK] resolved look_avatar_id:", look_avatar_id, "picked_voice:", picked_voice)
+
+    # 2) Try TTS path
+    try:
+        video_id = avatar_heygen.create_avatar_video_from_text(
+            avatar_id=look_avatar_id,
+            input_text=sr.final_script,
+            voice_id=picked_voice,            # may be None; adapter handles omission
+            title=f"{sr.icon_or_topic} · req#{sr.id}",
+            width=1080, height=1920,
+            # accept_group_id False because we've resolved to a look already
+            accept_group_id=False,
+        )
+    except HTTPError as e:
+        # 3) Fallback: synthesize audio with ElevenLabs -> upload -> render via audio_asset_id
+        print("[TASK] TTS failed, falling back to audio. Reason:", str(e))
+        # If your ScriptRequest.avatar has an ElevenLabs id, prefer that; otherwise continue without (ElevenLabs default/mapped)
+        el_voice = getattr(sr.avatar, "elevenlabs_voice_id", None)
+        mp3_bytes = tts_elevenlabs.synthesize_bytes(sr.final_script, el_voice)
+        audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes)
+        video_id = avatar_heygen.create_avatar_video_from_audio(
+            avatar_id=look_avatar_id,
+            audio_asset_id=audio_asset_id,
+            title=f"{sr.icon_or_topic} · req#{sr.id}",
+            width=1080, height=1920,
+            accept_group_id=False,
+        )
+
+    # 4) Wait and persist
+    st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
+    if st.get("status") != "completed":
+        sr.status = "Assembling"
+        sr.qc_json = {**(sr.qc_json or {}), "heygen_status": st}
+        sr.save()
+        return st
+
+    sr.asset_url = st.get("video_url", "")
+    sr.edit_url = avatar_heygen.get_share_url(video_id) or ""
+    sr.status = "Rendered"
+    sr.updated_at = timezone.now()
+    sr.save()
+    return {"video_url": sr.asset_url, "share_url": sr.edit_url}
+
 
 @shared_task
 def task_kickoff_chain(sr_id: int):
