@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from core.utils import generate_heritage_paragraph, call_openai_for_ssml
+from core.utils import generate_heritage_paragraph, call_openai_for_ssml, build_prompt,parse_openai_json,read_single_row_from_excel
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -17,6 +17,7 @@ from .tasks import (
     task_push_drive, task_generate_captions, task_sync_airtable,
     task_schedule, task_publish, task_metrics_24h
 )
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 
 def script_form(request):
     brands = Brand.objects.all()
@@ -47,9 +48,9 @@ class AutoPipelineAPI(APIView):
         task_kickoff_chain.delay(pk)
         return Response({"id": pk, "auto_pipeline": "queued"}, status=status.HTTP_202_ACCEPTED)
 
-# def request_detail(request, pk):
-#     sr = get_object_or_404(ScriptRequest, pk=pk)
-#     return render(request, "request_detail.html", {"sr": sr})
+def request_detail(request, pk):
+    sr = get_object_or_404(ScriptRequest, pk=pk)
+    return render(request, "request_detail.html", {"sr": sr})
 
 
 # class ScriptGenerateAPI(APIView):
@@ -158,7 +159,7 @@ class AutoPipelineAPI(APIView):
 
 
 
-    from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.http import JsonResponse
@@ -227,49 +228,60 @@ def script_avatar_page(request):
 
 
 class ParagraphAPI(APIView):
+    """
+    POST one of:
+      A) multipart/form-data:
+         - file: .xlsx upload (required in this mode)
+         - sheet: optional (name or index)
+         - row: optional (zero-based row index). If omitted, picks first non-empty icon row.
+      B) JSON/form fields:
+         - icon (required), category (optional), notes (optional)
+
+    Returns: { icon, category, notes, paragraph, ssml }
+    """
+    parser_classes = (MultiPartParser, JSONParser, FormParser)
+
+
     def post(self, request):
-        icon = request.data.get("icon", "")
-        notes = request.data.get("notes", "")
-        if not icon:
-            return Response({"error": "No icon provided"}, status=status.HTTP_400_BAD_REQUEST)
-        # Compose a prompt that asks for both plain paragraph and SSML
-        prompt = f"""
-            You are a senior fashion copywriter AND an SSML engineer.
-            GOAL
-            1) Write ONE documentary-style brand paragraph (120–180 words) about {icon}.
-            - Weave in these notes naturally: {notes}
-            - Concrete visuals (fit, fabric, color mood, scene); present tense; no hype, emojis, or markdown.
-            - Include one subtle styling suggestion.
-            - End with a calm, confident closing line.
-
-            2) Convert that paragraph into VALID, production-ready SSML (ElevenLabs-compatible).
-
-            SSML RULES
-            - Output ONE <speak> block only (no XML declaration, no code fences, no comments).
-            - Wrap content in <prosody rate="medium"> … </prosody>.
-            - Use <break> between 120–500ms at natural beats.
-            - Use <emphasis level="moderate"> on up to 3 short phrases.
-            - Convert years to <say-as interpret-as="date" format="y">YYYY</say-as>.
-            - Convert standalone integers to <say-as interpret-as="cardinal">N</say-as> when helpful.
-            - Escape special characters (&, <, >, ").
-            - End with <mark name="END"/> right before </speak>.
-            - No vendor-specific or <audio> tags.
-
-            OUTPUT FORMAT
-            Return ONLY a single JSON object (no extra text, no markdown), strictly valid and double-quoted:
-            {{
-            "paragraph": "string — the plain text paragraph (120–180 words).",
-            "ssml": "<speak>…</speak>"
-            }}
-            """
-
-        # Call OpenAI once
-        import json
-        response = call_openai_for_ssml(prompt)
         try:
-            data = json.loads(response)
-            return Response({"paragraph": data.get("paragraph", ""), "ssml": data.get("ssml", "")})
-        except Exception:
-            # fallback: just return the text as paragraph
-            return Response({"paragraph": response, "ssml": ""})
+            # Mode A: Excel upload
+            if "file" in request.FILES:
+                uploaded = request.FILES["file"]
+                sheet = request.data.get("sheet")
+                # row may come as string; normalize or None
+                row = request.data.get("row")
+                row_index = int(row) if row not in (None, "",) else None
 
+                row_dict = read_single_row_from_excel(uploaded, sheet=sheet, row_index=row_index)
+                icon = row_dict["icon"]
+                category = row_dict.get("category", "")
+                notes = row_dict.get("notes", "")
+
+            # Mode B: direct fields
+            else:
+                icon = str(request.data.get("icon", "")).strip()
+                category = str(request.data.get("category", "")).strip()
+                notes = str(request.data.get("notes", "")).strip()
+
+            if not icon:
+                return Response({"error": "No icon provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+            prompt = build_prompt(icon=icon, notes=notes, category=category)
+            raw = call_openai_for_ssml(prompt)
+            paragraph, ssml = parse_openai_json(raw)
+
+            return Response(
+                {
+                    "icon": icon,
+                    "category": category,
+                    "notes": notes,
+                    "paragraph": paragraph,
+                    "ssml": ssml,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except (KeyError, ValueError, IndexError) as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

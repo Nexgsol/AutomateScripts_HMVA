@@ -1,11 +1,11 @@
 from django.urls import path
 from .views import (
-  script_avatar_page, script_avatar_page, script_form, ParagraphAPI
+  script_avatar_page, script_avatar_page, script_form, ParagraphAPI, request_detail
 )
 
 urlpatterns = [
     path("", script_form, name="script-form"),
-    # path("r/<int:pk>/", request_detail, name="request-detail"),
+    path("r/<int:pk>/", request_detail, name="request-detail"),
     # path("v1/requests/", ScriptGenerateAPI.as_view()),
     # path("v1/requests/<int:pk>/", ScriptGetAPI.as_view()),
     # path("v1/requests/<int:pk>/render", RenderAvatarAPI.as_view()),

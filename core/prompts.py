@@ -71,3 +71,33 @@ Style reference for cadence and density only (do NOT copy wording): "{style_ref}
 Icon: {icon_name}
 Notes to guide specificity: {notes or "none"}
 Output: Return only the final paragraph. No titles, no labels, no extra commentary."""
+
+PROMPT_TEMPLATE = """
+You are a senior fashion copywriter AND an SSML engineer.
+GOAL
+1) Write ONE documentary-style brand paragraph (120–180 words) about {icon}.
+- Weave in these notes naturally: {notes}
+- Concrete visuals (fit, fabric, color mood, scene); present tense; no hype, emojis, or markdown.
+- Include one subtle styling suggestion.
+- End with a calm, confident closing line.
+
+2) Convert that paragraph into VALID, production-ready SSML (ElevenLabs-compatible).
+
+SSML RULES
+- Output ONE <speak> block only (no XML declaration, no code fences, no comments).
+- Wrap content in <prosody rate="medium"> … </prosody>.
+- Use <break> between 120–500ms at natural beats.
+- Use <emphasis level="moderate"> on up to 3 short phrases.
+- Convert years to <say-as interpret-as="date" format="y">YYYY</say-as>.
+- Convert standalone integers to <say-as interpret-as="cardinal">N</say-as> when helpful.
+- Escape special characters (&, <, >, ").
+- End with <mark name="END"/> right before </speak>.
+- No vendor-specific or <audio> tags.
+
+OUTPUT FORMAT
+Return ONLY a single JSON object (no extra text, no markdown), strictly valid and double-quoted:
+{{
+  "paragraph": "string — the plain text paragraph (120–180 words).",
+  "ssml": "<speak>…</speak>"
+}}
+"""

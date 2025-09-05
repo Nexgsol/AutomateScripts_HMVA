@@ -1,6 +1,10 @@
+import json
 import re, datetime
 from zoneinfo import ZoneInfo
 from .adapters import llm_openai
+import pandas as pd
+from prompts import PROMPT_TEMPLATE
+
 
 def word_range(duration: str):
     return {"15s": (60,75), "30s": (90,120), "60s": (150,180)}.get(duration, (90,120))
@@ -111,3 +115,61 @@ def generate_heritage_paragraph(icon_name: str, notes: str) -> str:
         text = re.sub(r'\s*\n+\s*', ' ', text)
         text = re.sub(r'\s{2,}', ' ', text).strip()
     return text
+
+def compose_icon_for_prompt(icon: str, category: str | None = None) -> str:
+    icon = (icon or "").strip()
+    category = (category or "").strip()
+    return f"{icon} ({category})" if icon and category else icon
+
+def build_prompt(icon: str, notes: str = "", category: str | None = None) -> str:
+    icon_for_prompt = compose_icon_for_prompt(icon, category)
+    return PROMPT_TEMPLATE.format(icon=icon_for_prompt, notes=(notes or "").strip())
+
+def parse_openai_json(raw: str) -> tuple[str, str]:
+    try:
+        data = json.loads(raw)
+        return str(data.get("paragraph", "")), str(data.get("ssml", ""))
+    except Exception:
+        return (raw or ""), ""
+
+def _pick_col(df: pd.DataFrame, *candidates: str) -> str:
+    cols = {c.lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand.lower() in cols:
+            return cols[cand.lower()]
+    raise KeyError(f"Missing required column. Tried: {candidates}")
+
+def read_single_row_from_excel(uploaded_file, sheet=None, row_index: int | None = None) -> dict:
+    """
+    Returns one normalized row: {"icon", "category", "notes"} from an XLSX upload.
+    - sheet: name or index; default first sheet
+    - row_index: zero-based; if None, first row with a non-empty Icon is used
+    """
+    df = pd.read_excel(uploaded_file, sheet_name=sheet if sheet is not None else 0)
+    if isinstance(df, dict):  # if multiple sheets were read
+        # take the first if a dict returned (no explicit sheet)
+        df = next(iter(df.values()))
+
+    col_icon  = _pick_col(df, "Icon Name", "ICon name", "Icon", "Name")
+    col_cat   = _pick_col(df, "Category", "Type")
+    col_notes = _pick_col(df, "Notes", "Note")
+
+    # keep only relevant columns; fill NaNs
+    df = df[[col_icon, col_cat, col_notes]].fillna("")
+
+    if row_index is not None:
+        try:
+            row = df.iloc[int(row_index)]
+        except Exception:
+            raise IndexError("row_index out of range for the provided sheet.")
+    else:
+        mask = df[col_icon].astype(str).str.strip().ne("")
+        if not mask.any():
+            raise ValueError("No non-empty 'Icon Name' rows found in the sheet.")
+        row = df.loc[mask].iloc[0]
+
+    return {
+        "icon": str(row[col_icon]).strip(),
+        "category": str(row[col_cat]).strip(),
+        "notes": str(row[col_notes]).strip(),
+    }
