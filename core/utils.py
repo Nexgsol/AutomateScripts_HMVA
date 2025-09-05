@@ -3,7 +3,7 @@ import re, datetime
 from zoneinfo import ZoneInfo
 from .adapters import llm_openai
 import pandas as pd
-from prompts import PROMPT_TEMPLATE
+from core.prompts import PROMPT_TEMPLATE
 
 
 def word_range(duration: str):
