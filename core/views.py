@@ -1,5 +1,6 @@
+import uuid
 from django.shortcuts import render, get_object_or_404, redirect
-from core.utils import generate_heritage_paragraph, call_openai_for_ssml, build_prompt,parse_openai_json,read_single_row_from_excel
+from core.utils import generate_heritage_paragraph, call_openai_for_ssml, build_prompt,parse_openai_json
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -15,7 +16,7 @@ from .adapters import avatar_heygen
 from .tasks import (
     task_generate_script, task_kickoff_chain, task_render_avatar, task_assemble_template,
     task_push_drive, task_generate_captions, task_sync_airtable,
-    task_schedule, task_publish, task_metrics_24h
+    task_schedule, task_publish, task_metrics_24h, orchestrate_paragraphs_job
 )
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 
@@ -229,59 +230,46 @@ def script_avatar_page(request):
 
 class ParagraphAPI(APIView):
     """
-    POST one of:
-      A) multipart/form-data:
-         - file: .xlsx upload (required in this mode)
-         - sheet: optional (name or index)
-         - row: optional (zero-based row index). If omitted, picks first non-empty icon row.
-      B) JSON/form fields:
-         - icon (required), category (optional), notes (optional)
+    POST multipart/form-data:
+      - file: .xlsx upload (required)
+      - sheet: optional (name or index)
+      - batch_size: optional (default 25)
 
-    Returns: { icon, category, notes, paragraph, ssml }
+    Behavior:
+      - Saves the file
+      - Queues Celery job to process in batches
+      - Returns { job_id } with 202
     """
     parser_classes = (MultiPartParser, JSONParser, FormParser)
 
-
     def post(self, request):
         try:
-            # Mode A: Excel upload
-            if "file" in request.FILES:
-                uploaded = request.FILES["file"]
-                sheet = request.data.get("sheet")
-                # row may come as string; normalize or None
-                row = request.data.get("row")
-                row_index = int(row) if row not in (None, "",) else None
+            if "file" not in request.FILES:
+                return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-                row_dict = read_single_row_from_excel(uploaded, sheet=sheet, row_index=row_index)
-                icon = row_dict["icon"]
-                category = row_dict.get("category", "")
-                notes = row_dict.get("notes", "")
+            uploaded = request.FILES["file"]
+            sheet = request.data.get("sheet")
+            try:
+                batch_size = int(request.data.get("batch_size", 25))
+                if batch_size <= 0:
+                    raise ValueError
+            except Exception:
+                return Response({"error": "batch_size must be a positive integer"}, status=400)
 
-            # Mode B: direct fields
-            else:
-                icon = str(request.data.get("icon", "")).strip()
-                category = str(request.data.get("category", "")).strip()
-                notes = str(request.data.get("notes", "")).strip()
-
-            if not icon:
-                return Response({"error": "No icon provided"}, status=status.HTTP_400_BAD_REQUEST)
-
-            prompt = build_prompt(icon=icon, notes=notes, category=category)
-            raw = call_openai_for_ssml(prompt)
-            paragraph, ssml = parse_openai_json(raw)
-
-            return Response(
-                {
-                    "icon": icon,
-                    "category": category,
-                    "notes": notes,
-                    "paragraph": paragraph,
-                    "ssml": ssml,
-                },
-                status=status.HTTP_200_OK,
+            # Persist the upload so workers can read it
+            saved_path = default_storage.save(
+                f"uploads/{uuid.uuid4()}_{uploaded.name}",
+                uploaded,
             )
 
-        except (KeyError, ValueError, IndexError) as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # Enqueue orchestration task (to be implemented next)
+            task = orchestrate_paragraphs_job(
+                file_path=saved_path,
+                sheet=sheet,
+                batch_size=batch_size,
+            )
+
+            return Response({"job_id": task.id, "status": "queued"}, status=status.HTTP_202_ACCEPTED)
+
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
