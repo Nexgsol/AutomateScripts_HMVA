@@ -1,3 +1,13 @@
+import json
+import re
+from typing import Dict
+
+from .prompts import BASE_SCRIPT_SYSTEM, base_script_user
+# If you don't have these helpers elsewhere, keep them here:
+
+
+
+
 import re, datetime
 from zoneinfo import ZoneInfo
 from .adapters import llm_openai
@@ -7,36 +17,6 @@ def word_range(duration: str):
 
 def llm_chat(system, user, temp=0.5):
     return llm_openai.chat(system, user, temp)
-
-def call_openai_for_ssml(prompt):
-    """
-    Calls OpenAI's API via llm_openai.chat to convert text to SSML format.
-    Returns the SSML string.
-    """
-    system = """You are an assistant that converts plain text into VALID, production-ready SSML for speech synthesis (ElevenLabs-compatible).Hard requirements:
-    - Return ONE <speak> block ONLY. No code fences, no explanations, no XML declaration.
-    - Use <prosody rate="medium"> for the wrapper unless specified.
-    - Use <break> with milliseconds (120–500ms) to create natural pacing between beats.
-    - Use <emphasis level="moderate"> to highlight 1–3 key phrases only.
-    - Convert years to <say-as interpret-as="date" format="y">YYYY</say-as> and integers to <say-as interpret-as="cardinal">N</say-as> where appropriate.
-    - Keep sentences 8–22 words for rhythm. Vary lengths slightly.
-    - Do NOT invent content; preserve meaning and order. Lightly segment long sentences for clarity.
-    - Escape special characters (&, <, >) if present in the input.
-    - End with <mark name="END"/> just before closing </speak>.
-    - No <audio> tags, no SSML comments, no vendor-specific tags.
-
-    Voice guidance (implicit, do not output as text):
-    - Tone: modern, confident, understated.
-    - Diction: clean and warm; avoid hype.
-
-    If the input already contains SSML, rebuild it into a single clean, standards-compliant block following the same rules.
-    """
-    user = prompt
-    try:
-        ssml = llm_openai.chat(system, user, temperature=0.2)
-        return ssml
-    except Exception as e:
-        return f"Error: {str(e)}"
 
 def count_words(t): return len(re.findall(r"\b[\w’']+\b", t))
 def first_sentence(t):
@@ -111,3 +91,99 @@ def generate_heritage_paragraph(icon_name: str, notes: str) -> str:
         text = re.sub(r'\s*\n+\s*', ' ', text)
         text = re.sub(r'\s{2,}', ' ', text).strip()
     return text
+
+_WS_NEWLINES = re.compile(r'\s*\n+\s*')
+_MULTI_WS = re.compile(r'\s{2,}')
+
+def _normalize_one_paragraph(text: str) -> str:
+    text = text.strip()
+    text = _WS_NEWLINES.sub(' ', text)
+    text = _MULTI_WS.sub(' ', text).strip()
+    # squash multiple paragraphs if any slipped in
+    parts = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+    if len(parts) > 1:
+        text = ' '.join(parts)
+    return text
+
+def _coerce_json(raw: str) -> Dict:
+    """
+    Best-effort JSON extraction:
+    - Try json.loads
+    - If it fails, pull first {...} block and try again
+    - Finally, wrap into expected schema if it's just a plain paragraph
+    """
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+
+    # Try to extract the outermost JSON object
+    m = re.search(r'\{.*\}', raw, flags=re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+
+    # If the model returned only the paragraph, coerce it
+    coerced = _normalize_one_paragraph(raw)
+    return {"paragraph": coerced, "ssml": ""}
+
+def generate_heritage_paragraph_with_ssml(
+    icon_name: str,
+    notes: str,
+    duration: str,
+    temp: float = 0.5,
+) -> Dict[str, str]:
+    """
+    Generates a single documentary-style paragraph (120–160 words) AND
+    a production-ready SSML version in one call.
+
+    Returns:
+        {"paragraph": "...", "ssml": "<speak>...</speak>"}
+    """
+    # Build user prompt (the base prompt should already ask for JSON with both fields)
+    user_prompt = base_script_user(icon_name, notes, duration)
+
+    raw = llm_chat(BASE_SCRIPT_SYSTEM, user_prompt, temp=temp)
+    data = _coerce_json(raw)
+
+    # Normalize and guard the paragraph
+    paragraph = _normalize_one_paragraph(data.get("paragraph", ""))
+
+    # If length drifts, nudge once
+    wc = len(paragraph.split())
+    if wc < 120 or wc > 160:
+        fix_prompt = (
+            "Rewrite into one flowing paragraph of 120–160 words. "
+            "Keep meaning and all six beats. "
+            "No emojis, no em dashes, standard punctuation only.\n\n"
+            f"Icon: {icon_name}\nNotes: {notes or 'none'}\n"
+            f"Original:\n{paragraph}\n\n"
+            "Return only the corrected paragraph."
+        )
+        paragraph = llm_chat("You are a precise editor.", fix_prompt, temp=0.3).strip()
+        paragraph = _normalize_one_paragraph(paragraph)
+
+    # SSML: accept model output if valid-looking, otherwise convert paragraph-only
+    ssml = (data.get("ssml") or "").strip()
+    has_speak = ssml.lower().startswith("<speak") and ssml.lower().endswith("</speak>")
+
+    if not has_speak:
+        # Fallback: ask model to convert the finalized paragraph to SSML only
+        ssml_system = (
+            "You convert plain text into VALID, production-ready SSML (ElevenLabs-compatible). "
+            "Return ONE <speak> block ONLY. No code fences, no explanations, no XML declaration. "
+            'Wrap with <prosody rate="medium">…</prosody>. Use <break time="120ms"–"500ms">, '
+            '<emphasis level="moderate"> (≤3 uses), convert years with '
+            '<say-as interpret-as="date" format="y">YYYY</say-as> and integers with '
+            '<say-as interpret-as="cardinal">N</say-as>. Escape special characters. '
+            'End with <mark name="END"/> before </speak>.'
+        )
+        ssml_user = (
+            "Convert the following paragraph to SSML following the rules:\n\n"
+            f"{paragraph}"
+        )
+        ssml = llm_chat(ssml_system, ssml_user, temp=0.2).strip()
+
+    return {"paragraph": paragraph, "ssml": ssml}

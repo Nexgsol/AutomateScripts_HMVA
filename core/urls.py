@@ -1,11 +1,11 @@
 from django.urls import path
 from .views import (
-  script_avatar_page, script_avatar_page, script_form, ParagraphAPI
+  api_tts_elevenlabs, heygen_avatars_api, heygen_voices_api, icon_meta_api, request_detail, script_avatar_page, script_form, ParagraphAPI
 )
 
 urlpatterns = [
     path("", script_form, name="script-form"),
-    # path("r/<int:pk>/", request_detail, name="request-detail"),
+    path("r/<int:pk>/", request_detail, name="request-detail"),
     # path("v1/requests/", ScriptGenerateAPI.as_view()),
     # path("v1/requests/<int:pk>/", ScriptGetAPI.as_view()),
     # path("v1/requests/<int:pk>/render", RenderAvatarAPI.as_view()),
@@ -23,8 +23,9 @@ urlpatterns = [
     path("studio/", script_avatar_page, name="script-avatar"),
     # path("api/v1/ssml", SSMLAPI.as_view(), name="ssml-api"),
 
-    # path("api/heygen/avatars", heygen_avatars_api, name="heygen-avatars"),
-    # path("api/heygen/voices", heygen_voices_api, name="heygen-voices"),
-    # path("api/icons/<int:pk>/meta", icon_meta_api, name="icon-meta"),
+    path("api/heygen/avatars", heygen_avatars_api, name="heygen-avatars"),
+    path("api/heygen/voices", heygen_voices_api, name="heygen-voices"),
+    path("api/icons/<int:pk>/meta", icon_meta_api, name="icon-meta"),
+    path("api/tts/elevenlabs/", api_tts_elevenlabs, name="api-tts-elevenlabs"),
     
 ]

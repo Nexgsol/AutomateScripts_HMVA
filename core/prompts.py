@@ -40,7 +40,7 @@ Follow instructions exactly. Never use emojis or em dashes. Use standard punctua
 Match a confident, cinematic cadence. Keep brand and item names accurate; if uncertain, prefer conservative phrasing like 'often associated' or 'widely linked'. 
 Do not invent specific model numbers unless widely documented."""
 
-def base_script_user(icon_name: str, notes: str) -> str:
+def base_script_user(icon_name: str, notes: str, duration: str) -> str:
     style_ref = (
         'When it comes to timeless American style, look no further than Paul Newman. '
         'His approach to fashion was very simple: use the basics, wear them well, and never look absurd. '
@@ -49,7 +49,7 @@ def base_script_user(icon_name: str, notes: str) -> str:
         'From western ruggedness to preppy cool to sharp suits, he showed that timeless pieces do the heavy lifting. '
         'His signature racing glasses underlined that style is also about originality, securing his place as a blueprint for masculine American style.'
     )
-    return f"""You are a scriptwriter who creates 30 second documentary style reel scripts about heritage mens fashion icons.
+    return f"""You are a scriptwriter who creates {duration} second documentary style reel scripts about heritage mens fashion icons.
 
 Write ONE paragraph of 100 to 130 words that follows this six-beat arc:
 1) Intro and hook that establishes why the icon matters.
