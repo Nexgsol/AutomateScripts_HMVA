@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
+
 from openpyxl import Workbook, load_workbook
 
 from core.models import ScriptRequest, PublishTarget
@@ -45,6 +46,18 @@ logger = logging.getLogger(__name__)
 
 RESULTS_DIR = "results"
 
+
+
+ 
+from django.core.files.storage import default_storage
+
+from .utils import (
+    build_prompt,
+    parse_openai_json,
+    call_openai_for_paragraph_and_ssml,
+    iter_rows_streaming, batch
+)
+RESULTS_DIR = "results"
 
 @shared_task
 def task_generate_script(sr_id: int):
@@ -345,6 +358,7 @@ def process_row_task(self, row_dict: dict) -> dict:
     raw = call_openai_for_paragraph_and_ssml(prompt)
     paragraph, ssml = parse_openai_json(raw)
 
+
     return {
         "row": row_dict["row"],
         "icon": icon,
@@ -353,6 +367,7 @@ def process_row_task(self, row_dict: dict) -> dict:
         "paragraph": paragraph,
         "ssml": ssml,
     }
+
 
 @shared_task(bind=True)
 def save_batch_task(self, batch_results: list, job_id: str, batch_no: int, results_path: str) -> dict:

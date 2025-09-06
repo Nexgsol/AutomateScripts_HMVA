@@ -168,6 +168,7 @@ def iter_rows_streaming(file_like_or_path, sheet=None):
     hmap = { _canon(h): i for i, h in enumerate(header or []) if h is not None }
 
     def _get(row, *cands):
+
         """
         Return a cell value from `row` by checking candidate column names.
 
@@ -179,6 +180,7 @@ def iter_rows_streaming(file_like_or_path, sheet=None):
             str: Normalized string from the first matching column,
                 or "" if none found.
         """
+
         for c in cands:
             idx = hmap.get(_canon(c))
             if idx is not None:
