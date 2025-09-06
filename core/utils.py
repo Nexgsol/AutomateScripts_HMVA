@@ -11,6 +11,8 @@ from .prompts import BASE_SCRIPT_SYSTEM, base_script_user
 import re, datetime
 from zoneinfo import ZoneInfo
 from .adapters import llm_openai
+from core.prompts import PROMPT_TEMPLATE
+
 
 def word_range(duration: str):
     return {"15s": (60,75), "30s": (90,120), "60s": (150,180)}.get(duration, (90,120))

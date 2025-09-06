@@ -17,6 +17,7 @@ from core.tasks.video_tasks import task_render_heygen_tts
 from core.tasks.script_tasks import (
     task_generate_script, task_kickoff_chain,
 )
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 
 def script_form(request):
     brands = Brand.objects.all()
@@ -245,6 +246,19 @@ def icon_meta_api(request, pk: int):
 
 
 class ParagraphAPI(APIView):
+    """
+    POST multipart/form-data:
+      - file: .xlsx upload (required)
+      - sheet: optional (name or index)
+      - batch_size: optional (default 25)
+
+    Behavior:
+      - Saves the file
+      - Queues Celery job to process in batches
+      - Returns { job_id } with 202
+    """
+    parser_classes = (MultiPartParser, JSONParser, FormParser)
+
     def post(self, request):
         icon = request.data.get("icon") or request.POST.get("icon")
         notes = request.data.get("notes") or request.POST.get("notes", "")
