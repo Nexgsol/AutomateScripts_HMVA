@@ -1,6 +1,5 @@
 import os, json, re, requests
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY","")
-print(OPENAI_API_KEY, "OPENAI_API_KEY")  # --- IGNORE ---
 OPENAI_MODEL = os.getenv("OPENAI_MODEL","gpt-4o-mini")
 
 def chat(system: str, user: str, temperature: float = 0.5) -> str:

@@ -1,29 +1,50 @@
+import os
 import uuid
-from celery import shared_task, group, chord
+import json
+import logging
+import datetime
+
+from celery import shared_task, group, chord, chain
 from django.utils import timezone
 from django.conf import settings
 from django.core.files.base import ContentFile
-
-from core.services.tts_service import fetch_or_create_tts_audio, load_audio_bytes
-from .models import ScriptRequest, PublishTarget
-from .prompts import GENERATOR_SYSTEM, gen_user, finalize_user, CAPTION_SYSTEM, captions_user
-from . import utils
-from .adapters import tts_elevenlabs, avatar_heygen, renderer_shotstack, renderer_cloudinary, airtable, drive_google
-from .adapters import publish_youtube, publish_instagram, publish_facebook, publish_tiktok
-import datetime, json
-from celery import chain
-
-
- 
 from django.core.files.storage import default_storage
 
-from .utils import (
+from openpyxl import Workbook, load_workbook
+
+from core.models import ScriptRequest, PublishTarget
+from core.prompts import (
+    GENERATOR_SYSTEM,
+    gen_user,
+    finalize_user,
+    CAPTION_SYSTEM,
+    captions_user,
+)
+from core.services.tts_service import fetch_or_create_tts_audio, load_audio_bytes
+from core.adapters import (
+    tts_elevenlabs,
+    avatar_heygen,
+    renderer_shotstack,
+    renderer_cloudinary,
+    airtable,
+    drive_google,
+    publish_youtube,
+    publish_instagram,
+    publish_facebook,
+    publish_tiktok,
+)
+from core.utils import (
     build_prompt,
     parse_openai_json,
     call_openai_for_paragraph_and_ssml,
-    iter_rows_streaming, batch
+    iter_rows_streaming,
+    batch,
 )
+
+logger = logging.getLogger(__name__)
+
 RESULTS_DIR = "results"
+
 
 @shared_task
 def task_generate_script(sr_id: int):
@@ -321,8 +342,8 @@ def process_row_task(self, row_dict: dict) -> dict:
     notes = row_dict.get("notes", "").strip()
 
     prompt = build_prompt(icon=icon, notes=notes, category=category)
-    raw = call_openai_for_paragraph_and_ssml(prompt)  # ONE LLM call → JSON string
-    paragraph, ssml = parse_openai_json(raw)          # robust: handles code fences + local SSML fallback if needed
+    raw = call_openai_for_paragraph_and_ssml(prompt)
+    paragraph, ssml = parse_openai_json(raw)
 
     return {
         "row": row_dict["row"],
@@ -333,42 +354,61 @@ def process_row_task(self, row_dict: dict) -> dict:
         "ssml": ssml,
     }
 
-
 @shared_task(bind=True)
 def save_batch_task(self, batch_results: list, job_id: str, batch_no: int, results_path: str) -> dict:
     """
-    Appends batch_results to a JSONL file. Keeps memory use tiny.
+    Appends batch_results to an XLSX file instead of JSONL.
+    Columns: row, icon, category, notes, paragraph, ssml
     """
-    # Ensure deterministic order inside a batch (by Excel row number)
+    # Ensure deterministic order inside a batch
     batch_results = sorted(batch_results, key=lambda x: x.get("row", 0))
 
-    # Append JSONL
-    with default_storage.open(results_path, "a") as f:
-        for item in batch_results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    abs_results = default_storage.path(results_path)
 
-    # Optionally, write/update a small progress marker (best effort)
-    progress_rel = f"{RESULTS_DIR}/{job_id}.progress.json"
-    progress_blob = json.dumps({"last_batch": batch_no}, ensure_ascii=False).encode()
-    # Save (overwrite) progress; some storages require delete-then-save, but Django’s default works with save()
-    default_storage.save(progress_rel, content=type("obj",(object,),{"read":lambda s: progress_blob})())
+    if not os.path.exists(abs_results):
+        # Create new workbook with headers
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["row", "icon", "category", "notes", "paragraph", "ssml"])
+    else:
+        wb = load_workbook(abs_results)
+        ws = wb.active
+
+    for item in batch_results:
+        ws.append([
+            item.get("row", ""),
+            item.get("icon", ""),
+            item.get("category", ""),
+            item.get("notes", ""),
+            item.get("paragraph", ""),
+            item.get("ssml", ""),
+        ])
+
+    wb.save(abs_results)
+
+    logger.info(f"[Batch {batch_no}] Saved {len(batch_results)} rows to {results_path}")
 
     return {"saved_batch": batch_no, "count": len(batch_results)}
-
 
 @shared_task(bind=True)
 def orchestrate_paragraphs_job(self, file_path: str, sheet=None, batch_size: int = 25) -> dict:
     job_id = self.request.id or str(uuid.uuid4())
     abs_path = default_storage.path(file_path)
 
-    # Prepare results file (JSONL)
-    results_rel = f"{RESULTS_DIR}/{job_id}.jsonl"
-    default_storage.save(results_rel, ContentFile(b""))
+    # Prepare XLSX file (with headers) instead of JSONL
+    results_rel = f"{RESULTS_DIR}/{job_id}.xlsx"
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["row", "icon", "category", "notes", "paragraph", "ssml"])
+    wb.save(default_storage.path(results_rel))
 
     total_batches = 0
     for total_batches, rows in enumerate(batch(iter_rows_streaming(abs_path, sheet=sheet), batch_size), start=1):
         g = group(process_row_task.s(row) for row in rows)
         chord(g)(save_batch_task.s(job_id, total_batches, results_rel))
+
+        logger.info(f"Scheduled batch {total_batches} for job {job_id}")
         self.update_state(state="PROGRESS", meta={"scheduled_batches": total_batches})
 
-    return {"results": results_rel, "batches": total_batches}
+    return {"job_id": job_id, "results": results_rel, "batches": total_batches}

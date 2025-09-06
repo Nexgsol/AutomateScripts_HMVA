@@ -1,8 +1,11 @@
 import json
-import re, datetime
+import re
+import datetime
 from zoneinfo import ZoneInfo
-from .adapters import llm_openai
+
+from core.adapters import llm_openai
 from core.prompts import PROMPT_TEMPLATE
+
 
 
 def word_range(duration: str):
@@ -165,11 +168,23 @@ def iter_rows_streaming(file_like_or_path, sheet=None):
     hmap = { _canon(h): i for i, h in enumerate(header or []) if h is not None }
 
     def _get(row, *cands):
+        """
+        Return a cell value from `row` by checking candidate column names.
+
+        Args:
+            row (tuple): Row values from Excel.
+            *cands (str): Possible header names (e.g. "Icon Name", "Icon").
+
+        Returns:
+            str: Normalized string from the first matching column,
+                or "" if none found.
+        """
         for c in cands:
             idx = hmap.get(_canon(c))
             if idx is not None:
                 return str(row[idx] or "").strip()
         return ""
+
 
     excel_row = 2  # header is row 1
     for r in rows:

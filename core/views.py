@@ -263,7 +263,7 @@ class ParagraphAPI(APIView):
             )
 
             # Enqueue orchestration task (to be implemented next)
-            task = orchestrate_paragraphs_job(
+            task = orchestrate_paragraphs_job.delay(
                 file_path=saved_path,
                 sheet=sheet,
                 batch_size=batch_size,
