@@ -14,9 +14,37 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  worker:
+  worker-openai:
     build: .
-    command: celery -A hmva worker --loglevel=INFO
+    command: celery -A hmva worker -l INFO -Q openai -c 6 --prefetch-multiplier=1 --max-tasks-per-child=200
+    env_file: [.env]
+    volumes:
+      - .:/app
+      - media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  worker-io:
+    build: .
+    command: celery -A hmva worker -l INFO -Q io -c 2 --prefetch-multiplier=1 --max-tasks-per-child=200
+    env_file: [.env]
+    volumes:
+      - .:/app
+      - media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  worker-default:
+    build: .
+    command: celery -A hmva worker -l INFO -Q default -c 2 --prefetch-multiplier=1 --max-tasks-per-child=200
     env_file: [.env]
     volumes:
       - .:/app

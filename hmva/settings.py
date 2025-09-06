@@ -52,6 +52,23 @@ CELERY_BROKER_URL = os.getenv("REDIS_URL") or "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
+# Make delivery robust
+CELERY_TASK_ACKS_LATE = True                 # re-queue if worker dies mid-task
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1        # smoother flow; better with rate limits
+CELERY_TASK_TRACK_STARTED = True
+
+# Keep content simple/compatible
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+
+# Route noisy API calls away from I/O and orchestration
+CELERY_TASK_ROUTES = {
+    "core.tasks.process_row_task": {"queue": "openai"},
+    "core.tasks.save_batch_task": {"queue": "io"},
+    "core.tasks.orchestrate_paragraphs_job": {"queue": "default"},
+}
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 HEYGEN_API_KEY = os.getenv("HEYGEN_API_KEY", "")
