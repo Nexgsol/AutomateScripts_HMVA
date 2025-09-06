@@ -5,7 +5,6 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL","gpt-4o-mini")
 
 def chat(system: str, user: str, temperature: float = 0.5) -> str:
     if not OPENAI_API_KEY:
-        print("OPENAI_API_KEY not set")
         return json.dumps({
             "paragraph": (
                 "This icon shaped menswear with rugged simplicity. Signature pieces included a Harrington jacket, "

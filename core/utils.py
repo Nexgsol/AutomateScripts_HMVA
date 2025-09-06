@@ -2,7 +2,6 @@ import json
 import re, datetime
 from zoneinfo import ZoneInfo
 from .adapters import llm_openai
-import pandas as pd
 from core.prompts import PROMPT_TEMPLATE
 
 
@@ -132,44 +131,88 @@ def parse_openai_json(raw: str) -> tuple[str, str]:
     except Exception:
         return (raw or ""), ""
 
-def _pick_col(df: pd.DataFrame, *candidates: str) -> str:
-    cols = {c.lower(): c for c in df.columns}
-    for cand in candidates:
-        if cand.lower() in cols:
-            return cols[cand.lower()]
-    raise KeyError(f"Missing required column. Tried: {candidates}")
-
-def read_single_row_from_excel(uploaded_file, sheet=None, row_index: int | None = None) -> dict:
+def iter_rows_streaming(file_like_or_path, sheet=None):
     """
-    Returns one normalized row: {"icon", "category", "notes"} from an XLSX upload.
-    - sheet: name or index; default first sheet
-    - row_index: zero-based; if None, first row with a non-empty Icon is used
+    Stream normalized rows from a large .xlsx without loading the whole sheet.
+    Yields dicts: {"row": excel_row_number, "icon", "category", "notes"}.
+    - file_like_or_path: file path or Django UploadedFile / file-like object
+    - sheet: None=first sheet, or sheet index, or sheet name
     """
-    df = pd.read_excel(uploaded_file, sheet_name=sheet if sheet is not None else 0)
-    if isinstance(df, dict):  # if multiple sheets were read
-        # take the first if a dict returned (no explicit sheet)
-        df = next(iter(df.values()))
+    from openpyxl import load_workbook
 
-    col_icon  = _pick_col(df, "Icon Name", "ICon name", "Icon", "Name")
-    col_cat   = _pick_col(df, "Category", "Type")
-    col_notes = _pick_col(df, "Notes", "Note")
-
-    # keep only relevant columns; fill NaNs
-    df = df[[col_icon, col_cat, col_notes]].fillna("")
-
-    if row_index is not None:
+    # open from file path or file-like
+    if hasattr(file_like_or_path, "read"):
+        fh = file_like_or_path
         try:
-            row = df.iloc[int(row_index)]
+            fh.seek(0)
         except Exception:
-            raise IndexError("row_index out of range for the provided sheet.")
+            pass
+        wb = load_workbook(fh, read_only=True, data_only=True)
     else:
-        mask = df[col_icon].astype(str).str.strip().ne("")
-        if not mask.any():
-            raise ValueError("No non-empty 'Icon Name' rows found in the sheet.")
-        row = df.loc[mask].iloc[0]
+        wb = load_workbook(file_like_or_path, read_only=True, data_only=True)
 
-    return {
-        "icon": str(row[col_icon]).strip(),
-        "category": str(row[col_cat]).strip(),
-        "notes": str(row[col_notes]).strip(),
-    }
+    ws = wb.worksheets[0] if sheet is None else (wb.worksheets[sheet] if isinstance(sheet, int) else wb[sheet])
+
+    def _canon(s: str) -> str:
+        return (s or "").strip().lower().replace("_", " ").replace("-", " ")
+
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows, None)
+    if not header:
+        wb.close()
+        return
+
+    hmap = { _canon(h): i for i, h in enumerate(header or []) if h is not None }
+
+    def _get(row, *cands):
+        for c in cands:
+            idx = hmap.get(_canon(c))
+            if idx is not None:
+                return str(row[idx] or "").strip()
+        return ""
+
+    excel_row = 2  # header is row 1
+    for r in rows:
+        icon = _get(r, "icon name", "icon", "name", "ICon name")
+        if icon:
+            yield {
+                "row": excel_row,
+                "icon": icon,
+                "category": _get(r, "category", "type"),
+                "notes": _get(r, "notes", "note"),
+            }
+        excel_row += 1
+
+    wb.close()
+
+
+def batch(iterable, size: int):
+    """Yield lists of up to `size` items from an iterator (memory-light)."""
+    buf = []
+    for item in iterable:
+        buf.append(item)
+        if len(buf) == size:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
+
+def call_openai_for_paragraph_and_ssml(prompt: str) -> str:
+    """
+    Calls OpenAI once with both paragraph + SSML instructions.
+    Returns raw JSON string (the model must output strictly JSON).
+    """
+    system = (
+        "You are a senior fashion copywriter AND an SSML engineer.\n"
+        "Return ONLY a single JSON object (no extra commentary, no markdown)."
+    )
+    try:
+        raw = llm_openai.chat(system, prompt, temperature=0.2).strip()
+        return raw
+    except Exception as e:
+        return json.dumps({
+            "paragraph": "",
+            "ssml": "",
+            "error": str(e),
+        })
