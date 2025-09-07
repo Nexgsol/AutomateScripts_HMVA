@@ -2,7 +2,6 @@ from __future__ import annotations
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
-from django.core.files.base import ContentFile
 
 from core.services.tts_service import fetch_or_create_tts_audio, load_audio_bytes
 from core.models import ScriptRequest, PublishTarget
@@ -12,18 +11,6 @@ from core.adapters import tts_elevenlabs, avatar_heygen, renderer_shotstack, ren
 from core.adapters import publish_youtube, publish_instagram, publish_facebook, publish_tiktok
 import datetime, json
 from celery import chain
-
-
- 
-from django.core.files.storage import default_storage
-
-from .utils import (
-    build_prompt,
-    parse_openai_json,
-    call_openai_for_paragraph_and_ssml,
-    iter_rows_streaming, batch
-)
-RESULTS_DIR = "results"
 
 @shared_task
 def task_generate_script(sr_id: int):
@@ -499,67 +486,3 @@ def task_kickoff_chain(sr_id: int):
     )
     flow.delay()
     return {"pipeline": "queued", "sr_id": sr_id}
-
-
-@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def process_row_task(self, row_dict: dict) -> dict:
-    """
-    row_dict: {"row": int, "icon": str, "category": str, "notes": str}
-    Returns:  {"row", "icon", "category", "notes", "paragraph", "ssml"}
-    """
-    icon = row_dict.get("icon", "").strip()
-    category = row_dict.get("category", "").strip()
-    notes = row_dict.get("notes", "").strip()
-
-    prompt = build_prompt(icon=icon, notes=notes, category=category)
-    raw = call_openai_for_paragraph_and_ssml(prompt)  # ONE LLM call → JSON string
-    paragraph, ssml = parse_openai_json(raw)          # robust: handles code fences + local SSML fallback if needed
-
-    return {
-        "row": row_dict["row"],
-        "icon": icon,
-        "category": category,
-        "notes": notes,
-        "paragraph": paragraph,
-        "ssml": ssml,
-    }
-
-
-@shared_task(bind=True)
-def save_batch_task(self, batch_results: list, job_id: str, batch_no: int, results_path: str) -> dict:
-    """
-    Appends batch_results to a JSONL file. Keeps memory use tiny.
-    """
-    # Ensure deterministic order inside a batch (by Excel row number)
-    batch_results = sorted(batch_results, key=lambda x: x.get("row", 0))
-
-    # Append JSONL
-    with default_storage.open(results_path, "a") as f:
-        for item in batch_results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
-
-    # Optionally, write/update a small progress marker (best effort)
-    progress_rel = f"{RESULTS_DIR}/{job_id}.progress.json"
-    progress_blob = json.dumps({"last_batch": batch_no}, ensure_ascii=False).encode()
-    # Save (overwrite) progress; some storages require delete-then-save, but Django’s default works with save()
-    default_storage.save(progress_rel, content=type("obj",(object,),{"read":lambda s: progress_blob})())
-
-    return {"saved_batch": batch_no, "count": len(batch_results)}
-
-
-@shared_task(bind=True)
-def orchestrate_paragraphs_job(self, file_path: str, sheet=None, batch_size: int = 25) -> dict:
-    job_id = self.request.id or str(uuid.uuid4())
-    abs_path = default_storage.path(file_path)
-
-    # Prepare results file (JSONL)
-    results_rel = f"{RESULTS_DIR}/{job_id}.jsonl"
-    default_storage.save(results_rel, ContentFile(b""))
-
-    total_batches = 0
-    for total_batches, rows in enumerate(batch(iter_rows_streaming(abs_path, sheet=sheet), batch_size), start=1):
-        g = group(process_row_task.s(row) for row in rows)
-        chord(g)(save_batch_task.s(job_id, total_batches, results_rel))
-        self.update_state(state="PROGRESS", meta={"scheduled_batches": total_batches})
-
-    return {"results": results_rel, "batches": total_batches}

@@ -1,4 +1,3 @@
-from urllib import request
 from urllib.parse import urlparse
 from django.shortcuts import render, get_object_or_404, redirect
 

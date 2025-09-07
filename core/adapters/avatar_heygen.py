@@ -373,7 +373,7 @@ def create_talking_photo_video_from_audio(
     title: str = "Heritage Reel",
     width: int = 1080,
     height: int = 1920,
-    background_color: str = "#000000",
+    background_color: str = "#00FF00",
 ) -> str:
     payload = {
         "title": title or "Heritage Reel",

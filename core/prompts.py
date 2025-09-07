@@ -32,6 +32,14 @@ def captions_user(topic, hashtags_csv):
             "Return JSON with fields: caption_yt, caption_tt, caption_ig_reels, caption_ig_stories, caption_fb_reels.")
 
 
+def word_range_for_duration(duration: str) -> tuple[int, int]:
+    duration_map = {
+        "15": (40, 55),
+        "30": (90, 120),
+        "60": (180, 230),
+    }
+    return duration_map.get(str(duration), (100, 130))  # fallback
+
 
 # core/prompts.py
 
@@ -41,6 +49,7 @@ Match a confident, cinematic cadence. Keep brand and item names accurate; if unc
 Do not invent specific model numbers unless widely documented."""
 
 def base_script_user(icon_name: str, notes: str, duration: str) -> str:
+    lo, hi = word_range_for_duration(duration)
     style_ref = (
         'When it comes to timeless American style, look no further than Paul Newman. '
         'His approach to fashion was very simple: use the basics, wear them well, and never look absurd. '
@@ -51,7 +60,7 @@ def base_script_user(icon_name: str, notes: str, duration: str) -> str:
     )
     return f"""You are a scriptwriter who creates {duration} second documentary style reel scripts about heritage mens fashion icons.
 
-Write ONE paragraph of 100 to 130 words that follows this six-beat arc:
+Write ONE paragraph of {lo} to {hi} words that follows this six-beat arc:
 1) Intro and hook that establishes why the icon matters.
 2) Style philosophy in one sentence.
 3) Signature looks with specific garments.
@@ -75,7 +84,7 @@ Output: Return only the final paragraph. No titles, no labels, no extra commenta
 PROMPT_TEMPLATE = """
 You are a senior fashion copywriter AND an SSML engineer.
 GOAL
-1) Write ONE documentary-style brand paragraph (120–180 words) about {icon}.
+1) Write ONE documentary-style brand paragraph ({lo}–{hi} words) about {icon}.
 - Weave in these notes naturally: {notes}
 - Concrete visuals (fit, fabric, color mood, scene); present tense; no hype, emojis, or markdown.
 - Include one subtle styling suggestion.
@@ -97,7 +106,7 @@ SSML RULES
 OUTPUT FORMAT
 Return ONLY a single JSON object (no extra text, no markdown), strictly valid and double-quoted:
 {{
-  "paragraph": "string — the plain text paragraph (120–180 words).",
+  "paragraph": "string — the plain text paragraph ({lo}–{hi} words).",
   "ssml": "<speak>…</speak>"
 }}
 """
