@@ -42,7 +42,7 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("TIMEZONE", "America/New_York")
 USE_I18N = True
 USE_TZ = True
-
+STATIC_ROOT = BASE_DIR / "staticfiles
 STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
