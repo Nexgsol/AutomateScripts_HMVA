@@ -14,6 +14,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -42,8 +43,11 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.getenv("TIMEZONE", "America/New_York")
 USE_I18N = True
 USE_TZ = True
-STATIC_ROOT = BASE_DIR / "staticfiles
 STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"  # ✅ you already fixed the missing quote
+
+# Recommended for prod (serves gzip/brotli of hashed files)
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
