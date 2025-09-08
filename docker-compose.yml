@@ -3,12 +3,14 @@ version: "3.9"
 services:
   web:
     build: .
-    command: bash -lc "python manage.py makemigrations && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    ports: ["8000:8000"]
+    # Dockerfile already: migrate + collectstatic + gunicorn (binds to 0.0.0.0:$PORT)
+    environment:
+      PORT: "8000"        # needed because your Dockerfile CMD uses $PORT
     env_file: [.env]
+    ports: ["8000:8000"]
     volumes:
-      - .:/app
       - media:/app/media
+      - staticfiles:/app/staticfiles
     depends_on:
       redis:
         condition: service_healthy
@@ -19,7 +21,6 @@ services:
     command: celery -A hmva worker --loglevel=INFO
     env_file: [.env]
     volumes:
-      - .:/app
       - media:/app/media
     depends_on:
       redis:
@@ -33,7 +34,6 @@ services:
     command: celery -A hmva beat --loglevel=INFO
     env_file: [.env]
     volumes:
-      - .:/app
       - media:/app/media
     depends_on:
       redis:
@@ -44,15 +44,13 @@ services:
 
   flower:
     image: mher/flower:2.0.1
-    command: ["celery", "--broker=redis://redis:6379/0", "flower", "--address=0.0.0.0", "--port=5555"]
+    command: ["flower", "--broker=redis://redis:6379/0", "--address=0.0.0.0", "--port=5555"]
     depends_on:
       redis:
         condition: service_started
     restart: unless-stopped
     ports:
       - "5555:5555"
-
-
 
   redis:
     image: redis:7-alpine
@@ -67,4 +65,5 @@ services:
 
 volumes:
   media:
+  staticfiles:
   redisdata:
