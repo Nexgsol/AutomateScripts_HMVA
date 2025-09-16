@@ -4,9 +4,9 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-key")
 DEBUG = True
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "automatescripts-hmva.onrender.com,localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "automatescripts-hmva.onrender.com,localhost,127.0.0.1,automatescriptshmva-production.up.railway.app").split(",")
 
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://automatescripts-hmva.onrender.com").split(",")
+CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://automatescripts-hmva.onrender.com,https://automatescriptshmva-production.up.railway.app/").split(",")
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind Render proxy
 CSRF_COOKIE_SECURE = True
