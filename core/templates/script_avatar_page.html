@@ -2,61 +2,82 @@
 {% block content %}
 <h2>Studio: Script → HeyGen</h2>
 
-<form method="post" id="studio-form">{% csrf_token %}
+<form method="post" id="studio-form" enctype="multipart/form-data">{% csrf_token %}
   <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:start;">
 
-    <!-- LEFT: Inputs + Paragraph preview -->
+    <!-- LEFT COLUMN -->
     <div>
-      <h3>1) Icon & Paragraph</h3>
+      <!-- Upload block -->
+      <h3>0) Upload Spreadsheet (.xlsx)</h3>
 
+      <div>
+        <label for="id_file">Spreadsheet file (.xlsx)</label>
+        <input
+          type="file"
+          id="id_file"
+          name="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        />
+      </div>
+
+      <div style="margin-top:8px">
+        <label for="id_sheet">Sheet name (optional)</label>
+        <input type="text" id="id_sheet" name="sheet" placeholder="Sheet1" />
+      </div>
+
+      <div style="margin-top:8px">
+        <label for="id_batch">Batch size (optional)</label>
+        <input type="number" id="id_batch" name="batch_size" min="1" step="1" placeholder="25" value="1" />
+      </div>
+
+      <button type="submit"
+              id="btn-upload"
+              onclick="document.getElementById('action-field').value='upload_sheet';"
+              style="margin-top:12px">
+        Upload & Process Sheet
+      </button>
+
+      <!-- Results: job + download -->
+      <div id="upload-results" style="margin-top:12px; display:none; border:1px solid #ddd; padding:10px; border-radius:8px;">
+        <div id="job-id-line" style="margin-bottom:6px;"></div>
+        <a id="results-download" class="btn btn-primary" href="#" download style="display:none;">Download Processed Results</a>
+        <div id="upload-msg" style="margin-top:8px; font-size:.9em; opacity:.8;"></div>
+      </div>
+
+      <!-- (Single-paragraph UI kept commented)
+      <hr style="margin:20px 0" />
+      <h3>1) Icon & Paragraph</h3>
       <div>
         <label>{{ form.brand.label }}</label>
         {{ form.brand }}
       </div>
-
       <div style="margin-top:8px">
         <label>{{ form.icon.label }}</label>
         {{ form.icon }}
       </div>
-
       <div style="margin-top:8px">
         <label>{{ form.category.label }}</label>
         {{ form.category }}
       </div>
-
       <div style="margin-top:8px">
         <label>{{ form.notes.label }}</label>
         {{ form.notes }}
       </div>
-
       <div style="margin-top:8px">
         <label>{{ form.duration.label }}</label>
         {{ form.duration }}
       </div>
-
       <button type="button" id="btn-generate" style="margin-top:12px">Generate Paragraph</button>
       <h4 style="margin-top:16px">Paragraph Preview</h4>
       <textarea id="paragraph" rows="10" style="width:100%" readonly>{{ paragraph }}</textarea>
-
-
-<h4 style="margin-top:16px">SSML Output</h4>
-<textarea id="ssml-output" rows="10" style="width:100%" readonly></textarea>
-
-      <input type="hidden" name="action" id="action-field" value="">
-      <button type="button" id="btn-voice" style="margin-top:12px" disabled>
-  Generate Voice (ElevenLabs)
-</button>
-
-<audio id="voice-audio" controls style="display:none; width:100%; margin-top:8px;"></audio>
-<a id="voice-download" href="#" download="voice.mp3" style="display:none; margin-top:6px; display:inline-block;">
-  Download Audio
-</a>
-
+      <h4 style="margin-top:16px">SSML Output</h4>
+      <textarea id="ssml-output" rows="10" style="width:100%" readonly>{{ ssml }}</textarea>
+      -->
     </div>
 
-    <!-- RIGHT: HeyGen picks + submit -->
+    <!-- RIGHT COLUMN -->
     <div>
-      <h3>2) Pick Avatar & Voice (HeyGen)</h3>
+      <h3>2) Pick Avatar & Voice</h3>
 
       <div>
         <label>HeyGen Avatar</label>
@@ -66,13 +87,30 @@
         <input type="hidden" name="heygen_avatar_id" id="id_heygen_avatar_id"/>
       </div>
 
-      <div style="margin-top:8px">
+      <div style="margin-top:12px">
         <label>HeyGen Voice (optional)</label>
         <select id="heygen-voice-select">
           <option value="">Loading…</option>
         </select>
         <input type="hidden" name="heygen_voice_id" id="id_heygen_voice_id"/>
       </div>
+
+      <div style="margin-top:12px">
+        <label>ElevenLabs Voice ID (for audio)</label>
+        <input type="text" id="eleven-voice-id" placeholder="e.g. 21m00Tcm4TlvDq8ikWAM" style="width:100%">
+      </div>
+
+      <button type="button" id="btn-voice" style="margin-top:12px">
+        Generate Voice (ElevenLabs)
+      </button>
+
+      <audio id="voice-audio" controls style="display:none; width:100%; margin-top:8px;"></audio>
+      <a id="voice-download" href="#" download="voice.mp3" style="display:none; margin-top:6px; display:inline-block;">
+        Download Audio
+      </a>
+
+      <input type="hidden" name="action" id="action-field" value="">
+      <input type="hidden" name="audio_url" id="id_audio_url">
 
       <button type="submit"
               onclick="document.getElementById('action-field').value='generate_video';"
@@ -83,72 +121,270 @@
   </div>
 </form>
 
+
 <script>
-  const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+  const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
 
-  // Auto-fill category/notes on icon change
-  const iconSelect = document.getElementById("id_icon");
-  const catInput = document.getElementById("id_category");
-  const notesInput = document.getElementById("id_notes");
-
-  async function refreshIconMeta(){
-    const id = iconSelect.value;
-    if(!id){ catInput.value=""; notesInput.value=""; return; }
-    const r = await fetch(`/api/icons/${id}/meta`);
-    const j = await r.json();
-    catInput.value = j.category || "";
-    notesInput.value = j.notes || "";
-  }
-  if (iconSelect) {
-    iconSelect.addEventListener("change", refreshIconMeta);
-    refreshIconMeta();
-  }
-
-  // Generate paragraph via API
-  const btnGen = document.getElementById("btn-generate");
-  const paraBox = document.getElementById("paragraph");
-  const ssmlBox = document.getElementById("ssml-output");
-
-  btnGen.addEventListener("click", async () => {
-    const iconText = iconSelect.options[iconSelect.selectedIndex]?.text || "";
-    const notes = notesInput.value || "";
-    const r = await fetch("/api/v1/paragraph", {
-      method:"POST",
-      headers: {"Content-Type":"application/json", "X-CSRFToken": csrf},
-      body: JSON.stringify({icon: iconText, notes})
-    });
-    const j = await r.json();
-    paraBox.value = j.paragraph || "";
-    ssmlBox.value = j.ssml || "";
+  // Make optional so file-only submit works even if those fields exist in DOM
+  ["id_brand","id_icon","id_category","id_notes","id_duration"].forEach(id=>{
+    const el = document.getElementById(id);
+    if (el) el.removeAttribute("required");
   });
 
-  // Populate HeyGen avatars/voices
-  const avSel = document.getElementById("heygen-avatar-select");
+  // --- Elements (some may not exist if that section is commented) ---
+  const formEl     = document.getElementById("studio-form");
+  const actionFld  = document.getElementById("action-field");
+
+  const iconSelect   = document.getElementById("id_icon");
+  const catInput     = document.getElementById("id_category");
+  const notesInput   = document.getElementById("id_notes");
+  const durationInput= document.getElementById("id_duration");
+  const paraBox      = document.getElementById("paragraph");
+  const ssmlBox      = document.getElementById("ssml-output");
+  const btnGen       = document.getElementById("btn-generate");
+
+  const uploadBtn    = document.getElementById("btn-upload");
+  const resultsBox   = document.getElementById("upload-results");
+  const jobLine      = document.getElementById("job-id-line");
+  const dlBtn        = document.getElementById("results-download");
+  const msgBox       = document.getElementById("upload-msg");
+
+  // Optional: auto-fill meta
+  async function refreshIconMeta(){
+    const id = iconSelect?.value;
+    if(!id){ if(catInput) catInput.value=""; if(notesInput) notesInput.value=""; return; }
+    try {
+      const r = await fetch(`/api/icons/${id}/meta`, { cache: "no-store" });
+      const j = await r.json();
+      if(catInput)  catInput.value   = j.category || "";
+      if(notesInput) notesInput.value = j.notes || "";
+    } catch(e) {}
+  }
+  if (iconSelect) { iconSelect.addEventListener("change", refreshIconMeta); refreshIconMeta(); }
+
+  // -----------------------------
+  // Single paragraph (if enabled)
+  // -----------------------------
+  if (btnGen) {
+    btnGen.addEventListener("click", async () => {
+      const iconText = iconSelect?.options[iconSelect.selectedIndex]?.text || "";
+      const notes    = notesInput?.value || "";
+      const duration = durationInput?.value || "";
+
+      btnGen.disabled = true;
+      const prev = btnGen.textContent;
+      btnGen.textContent = "Generating…";
+
+      try {
+        const r = await fetch("/api/v1/paragraph", {
+          method:"POST",
+          headers: {"Content-Type":"application/json", "X-CSRFToken": csrf},
+          body: JSON.stringify({icon: iconText, notes, duration})
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || "Failed");
+        if (paraBox) paraBox.value = j?.data?.paragraph || j?.paragraph || "";
+        if (ssmlBox) ssmlBox.value = j?.data?.ssml || j?.ssml || "";
+      } catch (e) {
+        alert("Error generating paragraph.");
+      } finally {
+        btnGen.disabled = false;
+        btnGen.textContent = prev;
+      }
+    });
+  }
+
+  // ----------------------------------------
+  // File upload → queue job → poll → download
+  // ----------------------------------------
+  async function pollJob(statusUrl) {
+    if (!statusUrl) return;
+    let tries = 0;
+    const maxTries = 1800; // ~1 hour at 2s
+    const t = setInterval(async () => {
+      tries++;
+      try {
+        const r = await fetch(statusUrl, { cache: "no-store" });
+        const st = await r.json();
+
+        if (jobLine) jobLine.textContent = st?.job_id ? `Job: ${st.job_id} — ${st.state}` : `Status: ${st.state}`;
+
+        if (st.state === "SUCCESS") {
+          clearInterval(t);
+          const url = st.download_url || "";
+          if (url) {
+            if (dlBtn) { dlBtn.href = url; dlBtn.style.display = "inline-block"; }
+            if (msgBox) msgBox.textContent = "Done. Download ready.";
+          } else {
+            if (msgBox) msgBox.textContent = "Done, but no download URL returned.";
+          }
+        } else if (st.state === "FAILURE") {
+          clearInterval(t);
+          if (msgBox) msgBox.textContent = st.error || "Job failed.";
+        } else {
+          if (msgBox) msgBox.textContent = "Processing…";
+        }
+
+        if (tries >= maxTries) {
+          clearInterval(t);
+          if (msgBox) msgBox.textContent = "Timed out waiting for job.";
+        }
+      } catch (e) {
+        if (tries >= maxTries) {
+          clearInterval(t);
+          if (msgBox) msgBox.textContent = "Polling error.";
+        }
+      }
+    }, 2000);
+  }
+
+  if (formEl) {
+    formEl.addEventListener("submit", async (e) => {
+      // Only intercept the Upload & Process Sheet action
+      if (!actionFld || actionFld.value !== "upload_sheet") return;
+
+      e.preventDefault();
+
+      const fd = new FormData(formEl); // file, sheet, batch_size, csrf, action
+      try {
+        if (uploadBtn) {
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = "Uploading…";
+        }
+
+        const r = await fetch("/api/v1/paragraph", {
+          method: "POST",
+          headers: { "X-CSRFToken": csrf }, // don't set Content-Type with FormData
+          body: fd
+        });
+        const j = await r.json();
+
+        if (resultsBox) resultsBox.style.display = "block";
+        if (dlBtn) dlBtn.style.display = "none";        // hide download until SUCCESS
+        if (msgBox) msgBox.textContent = "";
+        if (jobLine) jobLine.textContent = j.job_id ? `Job: ${j.job_id}` : "";
+
+        if (!r.ok) {
+          if (msgBox) msgBox.textContent = j.error || "Upload failed.";
+          return;
+        }
+
+        // If backend returns status_url, poll it; otherwise try to construct one from job_id
+        const statusUrl = j.status_url || (j.job_id ? `/api/jobs/${j.job_id}/status/` : null);
+
+        if (j.download_url) {
+          // (Rare) if the results are already available
+          if (dlBtn) { dlBtn.href = j.download_url; dlBtn.style.display = "inline-block"; }
+          if (msgBox) msgBox.textContent = "Done. Download ready.";
+        } else if (statusUrl) {
+          if (msgBox) msgBox.textContent = "Queued. Processing…";
+          pollJob(statusUrl);
+        } else {
+          if (msgBox) msgBox.textContent = "Queued, but no status URL was returned.";
+        }
+      } catch (err) {
+        if (resultsBox) resultsBox.style.display = "block";
+        if (dlBtn) dlBtn.style.display = "none";
+        if (msgBox) msgBox.textContent = "Upload error.";
+      } finally {
+        if (uploadBtn) {
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = "Upload & Process Sheet";
+        }
+        if (actionFld) actionFld.value = ""; // reset
+      }
+    });
+  }
+
+  // ------------------------------
+  // ElevenLabs TTS (unchanged)
+  // ------------------------------
+  const btnVoice = document.getElementById('btn-voice');
+  const elevenVoiceInput = document.getElementById('eleven-voice-id');
+  const audioEl = document.getElementById('voice-audio');
+  const dlLink = document.getElementById('voice-download');
   const voSel = document.getElementById("heygen-voice-select");
-  const avHidden = document.getElementById("id_heygen_avatar_id");
   const voHidden = document.getElementById("id_heygen_voice_id");
+  const hidAudio = document.getElementById('id_audio_url');
+
+  if (voSel) {
+    voSel.addEventListener("change", () => {
+      const val = voSel.value;
+      if (voHidden) voHidden.value = val;
+      if (elevenVoiceInput) elevenVoiceInput.value = val;
+    });
+  }
+
+  if (btnVoice) {
+    btnVoice.addEventListener('click', async () => {
+      const voiceId = (elevenVoiceInput?.value || '').trim();
+      const ssml = (ssmlBox?.value || '').trim();
+      if (!voiceId) { alert('Please enter an ElevenLabs Voice ID.'); return; }
+      if (!ssml) { alert('SSML is empty. Generate the paragraph first.'); return; }
+
+      btnVoice.disabled = true;
+      const prev = btnVoice.textContent;
+      btnVoice.textContent = 'Generating voice…';
+
+      try {
+        const fd = new FormData();
+        fd.append('voice_id', voiceId);
+        fd.append('ssml', ssml);
+
+        const r = await fetch("{% url 'api-tts-elevenlabs' %}", {
+          method: 'POST',
+          headers: {'X-CSRFToken': csrf},
+          body: fd
+        });
+        const j = await r.json();
+        if (j.audio_url) {
+          audioEl.src = j.audio_url;
+          audioEl.style.display = 'block';
+          audioEl.load();
+          dlLink.href = j.audio_url;
+          dlLink.style.display = 'inline-block';
+          hidAudio.value = new URL(j.audio_url, window.location.origin).href;
+        } else {
+          alert(j.error || 'Failed to generate audio.');
+        }
+      } catch (e) {
+        alert('Error generating audio.');
+      } finally {
+        btnVoice.disabled = false;
+        btnVoice.textContent = prev;
+      }
+    });
+  }
+
+  // ------------------------------
+  // Load HeyGen avatars/voices
+  // ------------------------------
+  const avSel = document.getElementById("heygen-avatar-select");
+  const avHidden = document.getElementById("id_heygen_avatar_id");
 
   function setSelOptions(sel, items, idKey, nameKey){
+    if (!sel) return;
     sel.innerHTML = '<option value="">Select…</option>';
-    items.forEach(it=>{
+    (items || []).forEach(it=>{
       const opt = document.createElement("option");
       opt.value = it[idKey] || it["id"] || it["avatar_id"] || "";
       opt.textContent = it[nameKey] || it["name"] || opt.value;
       sel.appendChild(opt);
     });
   }
+
   async function loadHeygen(){
     try{
       const a = await (await fetch("/api/heygen/avatars")).json();
       setSelOptions(avSel, a.avatars || [], "id", "name");
-    }catch(e){ avSel.innerHTML = '<option value="">(no avatars)</option>'; }
+    }catch(e){ if(avSel) avSel.innerHTML = '<option value="">(no avatars)</option>'; }
     try{
       const v = await (await fetch("/api/heygen/voices")).json();
-      setSelOptions(voSel, v.voices || [], "id", "name");
-    }catch(e){ voSel.innerHTML = '<option value="">(no voices)</option>'; }
+      const vs = document.getElementById("heygen-voice-select");
+      setSelOptions(vs, v.voices || [], "id", "name");
+    }catch(e){ const vs = document.getElementById("heygen-voice-select"); if(vs) vs.innerHTML = '<option value="">(no voices)</option>'; }
   }
-  avSel.addEventListener("change", ()=> avHidden.value = avSel.value);
-  voSel.addEventListener("change", ()=> voHidden.value = voSel.value);
+  if (avSel) avSel.addEventListener("change", ()=> { if (avHidden) avHidden.value = avSel.value; });
   loadHeygen();
 </script>
 {% endblock %}

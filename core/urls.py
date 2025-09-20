@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-  script_avatar_page, script_avatar_page, script_form, ParagraphAPI, request_detail
+  api_tts_elevenlabs, job_status  , heygen_avatars_api, heygen_voices_api, icon_meta_api, script_avatar_page, script_avatar_page, script_form, ParagraphAPI, request_detail
 )
 
 urlpatterns = [
@@ -18,13 +18,15 @@ urlpatterns = [
     # path("v1/requests/<int:pk>/metrics24h", MetricsAPI.as_view()),
     # path("avatar/new/", avatar_quick_create, name="avatar-new"),
     path("api/v1/paragraph", ParagraphAPI.as_view(), name="paragraph-api"),
+    path("api/jobs/<uuid:job_id>/status/", job_status, name="job-status"),
 
 
     path("studio/", script_avatar_page, name="script-avatar"),
     # path("api/v1/ssml", SSMLAPI.as_view(), name="ssml-api"),
 
-    # path("api/heygen/avatars", heygen_avatars_api, name="heygen-avatars"),
-    # path("api/heygen/voices", heygen_voices_api, name="heygen-voices"),
-    # path("api/icons/<int:pk>/meta", icon_meta_api, name="icon-meta"),
+    path("api/heygen/avatars", heygen_avatars_api, name="heygen-avatars"),
+    path("api/heygen/voices", heygen_voices_api, name="heygen-voices"),
+    path("api/icons/<int:pk>/meta", icon_meta_api, name="icon-meta"),
+    path("api/tts/elevenlabs/", api_tts_elevenlabs, name="api-tts-elevenlabs"),
     
 ]
