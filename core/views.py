@@ -236,132 +236,129 @@ def heygen_voices_api(request):
     return JsonResponse({"voices": avatar_heygen.list_voices()})
 
 
-def icon_meta_api(request, pk: int):
-    icon = get_object_or_404(Icon, pk=pk)
-    return JsonResponse({"category": getattr(icon, "category", ""), "notes": getattr(icon, "short_cues", "")})
+# def icon_meta_api(request, pk: int):
+#     icon = get_object_or_404(Icon, pk=pk)
+#     return JsonResponse({"category": getattr(icon, "category", ""), "notes": getattr(icon, "short_cues", "")})
 
 
 # Paragraph generator API (used by the left-side button)
 
 
+# class ParagraphAPI(APIView):
+#     """
+#     POST multipart/form-data:
+#       - file: .xlsx upload (required)
+#       - sheet: optional (name or index)
+#       - batch_size: optional (default 25)
+
+#     Behavior:
+#       - Saves the file
+#       - Queues Celery job to process in batches
+#       - Returns { job_id } with 202
+#     """
+#     parser_classes = (MultiPartParser, JSONParser, FormParser)
+
+#     def post(self, request):
+#         try:
+#             if "file" not in request.FILES:
+#                 return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+#             uploaded = request.FILES["file"]
+#             sheet = request.data.get("sheet")
+#             try:
+#                 batch_size = int(request.data.get("batch_size", 25))
+#                 if batch_size <= 0:
+#                     raise ValueError
+#             except Exception:
+#                 return Response({"error": "batch_size must be a positive integer"}, status=400)
+
+#             # Persist the upload so workers can read it
+#             saved_path = default_storage.save(
+#                 f"uploads/{uuid.uuid4()}_{uploaded.name}",
+#                 uploaded,
+#             )
+
+#             # Enqueue orchestration task (to be implemented next)
+
+#             task = orchestrate_paragraphs_job.delay(
+
+#                 file_path=saved_path,
+#                 sheet=sheet,
+#                 batch_size=batch_size,
+#             )
+
+#             return Response({"job_id": task.id, "status": "queued"}, status=status.HTTP_202_ACCEPTED)
+
+#         except Exception as e:
+#             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+from uuid import uuid4
+import os
+from django.core.files.storage import default_storage
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
+
+# your generator
+from core.utils import generate_heritage_paragraph_with_ssml
+# your Celery orchestration task (must accept the kwargs used below)
+
+
+
 class ParagraphAPI(APIView):
     """
-    POST multipart/form-data:
-      - file: .xlsx upload (required)
-      - sheet: optional (name or index)
-      - batch_size: optional (default 25)
+    Modes (driven by 'action'):
 
-    Behavior:
-      - Saves the file
-      - Queues Celery job to process in batches
-      - Returns { job_id } with 202
+    A) action=upload_sheet  (multipart)
+       - file: .xlsx (required)
+       - sheet: optional sheet name/index (default 'Sheet1')
+       - batch_size: optional (default 25)
+       -> Saves file, enqueues orchestrate_paragraphs_job(mode='local_file'), returns {job_id} 202
+
+    B) action=process_google_sheet  (no file, either JSON or form)
+       - sheet_public_url: CSV export URL (e.g., .../export?format=csv&gid=0) [required]
+       - sheet_id: Google spreadsheet ID [required]
+       - sheet_name: tab name (default 'Sheet1')
+       - batch_size: optional (default 25)
+       -> Enqueues orchestrate_paragraphs_job(mode='google_sheet'), returns {job_id} 202
+
+    C) (default) Single generate (form or JSON)
+       - icon (required), notes (optional), duration (optional)
+       -> Calls generator directly, returns 200 with data
     """
     parser_classes = (MultiPartParser, JSONParser, FormParser)
 
     def post(self, request):
-        icon = request.data.get("icon") or request.POST.get("icon")
-        notes = request.data.get("notes") or request.POST.get("notes", "")
-        duration = request.data.get("duration") or request.POST.get("duration", "")
-        print("Generating paragraph with:", icon, notes, duration)
-        if not icon:
-            return Response(
-                {"error": "icon is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        paragraph_ssml = generate_heritage_paragraph_with_ssml(
-            icon, notes, duration
-        )
-        return Response({"icon": icon, "data": paragraph_ssml}, status=status.HTTP_200_OK)
-    
-
-
-
-
-
-
-
-# views.py
-import os
-import json
-import uuid
-import requests
-from django.conf import settings
-from django.http import JsonResponse, HttpResponseBadRequest
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt  # not needed if you pass CSRF
-from django.utils.text import get_valid_filename
-
-
-@require_POST
-def api_tts_elevenlabs(request):
-    """
-    POST: voice_id, ssml
-    Returns: {"audio_url": "<MEDIA_URL>/tts/<file>.mp3"}
-    """
-    # Support both FormData and JSON
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID") or request.POST.get("voice_id")  # default from .env
-    ssml = request.POST.get("ssml")
-    if not voice_id or not ssml:
         try:
-            data = json.loads(request.body or "{}")
-            voice_id = os.getenv("ELEVENLABS_VOICE_ID") or data.get("voice_id")  # default from .env
-            ssml = ssml or data.get("ssml")
-        except Exception:
-            pass
+            if "file" not in request.FILES:
+                return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not voice_id or not ssml:
-        return HttpResponseBadRequest("Missing voice_id or ssml")
+            uploaded = request.FILES["file"]
+            sheet = request.data.get("sheet")
+            try:
+                batch_size = int(request.data.get("batch_size", 25))
+                if batch_size <= 0:
+                    raise ValueError
+            except Exception:
+                return Response({"error": "batch_size must be a positive integer"}, status=400)
 
-    api_key = getattr(settings, "ELEVENLABS_API_KEY", None)
-    if not api_key:
-        return JsonResponse({"error": "ELEVENLABS_API_KEY not configured"}, status=500)
+            # Persist the upload so workers can read it
+            saved_path = default_storage.save(
+                f"uploads/{uuid.uuid4()}_{uploaded.name}",
+                uploaded,
+            )
 
-    # ElevenLabs TTS (stream) endpoint
-    # Note: If your account requires "text" instead of "ssml",
-    # you can switch to {"text": ssml, "use_sid": true} or their SSML flag.
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream?output_format=mp3_44100_128"
+            # Enqueue orchestration task (to be implemented next)
+            task = orchestrate_paragraphs_job(
+                file_path=saved_path,
+                sheet=sheet,
+                batch_size=batch_size,
+            )
 
-    payload = {
-        "model_id": "eleven_multilingual_v2",
-        # IMPORTANT: SSML goes in "text"
-        "text": ssml,
-        # Tell ElevenLabs this is SSML
-        "input_format": "ssml",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        },
-        # Optional but helpful
-        "apply_text_normalization": "auto",
-        "use_speaker_boost": True
-    }
+            return Response({"job_id": task.id, "status": "queued"}, status=status.HTTP_202_ACCEPTED)
 
-    headers = {
-        "xi-api-key": api_key,
-        "Accept": "audio/mpeg",
-        "Content-Type": "application/json",
-    }
-
-
-
-    try:
-        r = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
-        if r.status_code != 200:
-            # Some orgs get 422 if SSML flag/field differs — include server message
-            return JsonResponse({"error": f"ElevenLabs error {r.status_code}: {r.text}"}, status=400)
-
-        # Save MP3 under MEDIA_ROOT/tts/
-        outdir = os.path.join(settings.MEDIA_ROOT, "tts")
-        os.makedirs(outdir, exist_ok=True)
-        filename = f"{uuid.uuid4().hex}.mp3"
-        filepath = os.path.join(outdir, get_valid_filename(filename))
-
-        with open(filepath, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-
-        audio_url = f"{settings.MEDIA_URL}tts/{filename}"
-        return JsonResponse({"audio_url": audio_url})
-    except requests.RequestException as e:
-        return JsonResponse({"error": f"Network error: {e}"}, status=502)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

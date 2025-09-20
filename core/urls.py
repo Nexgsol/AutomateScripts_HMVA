@@ -1,6 +1,6 @@
 from django.urls import path
 from .views import (
-  api_tts_elevenlabs, heygen_avatars_api, heygen_voices_api, icon_meta_api, request_detail, script_avatar_page, script_form, ParagraphAPI
+  api_tts_elevenlabs, job_status  , heygen_avatars_api, heygen_voices_api, icon_meta_api, script_avatar_page, script_avatar_page, script_form, ParagraphAPI, request_detail
 )
 
 urlpatterns = [
@@ -18,6 +18,7 @@ urlpatterns = [
     # path("v1/requests/<int:pk>/metrics24h", MetricsAPI.as_view()),
     # path("avatar/new/", avatar_quick_create, name="avatar-new"),
     path("api/v1/paragraph", ParagraphAPI.as_view(), name="paragraph-api"),
+    path("api/jobs/<uuid:job_id>/status/", job_status, name="job-status"),
 
 
     path("studio/", script_avatar_page, name="script-avatar"),

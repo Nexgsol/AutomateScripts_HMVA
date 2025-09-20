@@ -44,9 +44,12 @@ def word_range_for_duration(duration: str) -> tuple[int, int]:
 # core/prompts.py
 
 BASE_SCRIPT_SYSTEM = """You are a precise, concise scriptwriter for 30-second mini-documentaries about heritage menswear icons. 
-Follow instructions exactly. Never use emojis or em dashes. Use standard punctuation only. Output one single flowing paragraph with no headings or lists.
+Follow instructions exactly. Never use emojis or em dashes. Use standard punctuation only. Return ONLY a single JSON object (no extra commentary, no markdown).
 Match a confident, cinematic cadence. Keep brand and item names accurate; if uncertain, prefer conservative phrasing like 'often associated' or 'widely linked'. 
-Do not invent specific model numbers unless widely documented."""
+Do not invent specific model numbers unless widely documented.
+
+IMPORTANT: You must return your answer as a valid JSON object, containing keys "paragraph" and "ssml". 
+"""
 
 def base_script_user(icon_name: str, notes: str, duration: str) -> str:
     lo, hi = word_range_for_duration(duration)
@@ -58,28 +61,35 @@ def base_script_user(icon_name: str, notes: str, duration: str) -> str:
         'From western ruggedness to preppy cool to sharp suits, he showed that timeless pieces do the heavy lifting. '
         'His signature racing glasses underlined that style is also about originality, securing his place as a blueprint for masculine American style.'
     )
-    return f"""You are a scriptwriter who creates {duration} second documentary style reel scripts about heritage mens fashion icons.
+    return f"""
+You are a senior fashion copywriter AND an SSML engineer.
+GOAL
+1) Write ONE documentary-style brand paragraph ({lo}–{hi} words) about {icon_name}.
+- Weave in these notes naturally: {notes}
+- Concrete visuals (fit, fabric, color mood, scene); present tense; no hype, emojis, or markdown.
+- Include one subtle styling suggestion.
+- End with a calm, confident closing line.
 
-Write ONE paragraph of {lo} to {hi} words that follows this six-beat arc:
-1) Intro and hook that establishes why the icon matters.
-2) Style philosophy in one sentence.
-3) Signature looks with specific garments.
-4) One iconic accessory with cultural impact.
-5) Range of style across settings.
-6) Closing legacy line that names their influence on menswear.
+2) Convert that paragraph into VALID, production-ready SSML (ElevenLabs-compatible).
 
-Rules:
-- One flowing paragraph. No headings or lists in the output.
-- No emojis. No em dashes. Use standard punctuation only.
-- Be concise, authoritative, and cinematic.
-- Keep brand and item names accurate. If uncertain, use conservative phrasing such as 'often associated' or 'widely linked'.
-- Do not invent specific model numbers unless well known.
+SSML RULES
+- Output ONE <speak> block only (no XML declaration, no code fences, no comments).
+- Wrap content in <prosody rate="medium"> … </prosody>.
+- Use <break> between 120–500ms at natural beats.
+- Use <emphasis level="moderate"> on up to 3 short phrases.
+- Convert years to <say-as interpret-as="date" format="y">YYYY</say-as>.
+- Convert standalone integers to <say-as interpret-as="cardinal">N</say-as> when helpful.
+- Escape special characters (&, <, >, ").
+- End with <mark name="END"/> right before </speak>.
+- No vendor-specific or <audio> tags.
 
-Style reference for cadence and density only (do NOT copy wording): "{style_ref}"
-
-Icon: {icon_name}
-Notes to guide specificity: {notes or "none"}
-Output: Return only the final paragraph. No titles, no labels, no extra commentary."""
+OUTPUT FORMAT
+Return ONLY a single JSON object (no extra text, no markdown), strictly valid and double-quoted:
+{{
+  "paragraph": "string — the plain text paragraph ({lo}–{hi} words).",
+  "ssml": "<speak>…</speak>"
+}}
+"""
 
 PROMPT_TEMPLATE = """
 You are a senior fashion copywriter AND an SSML engineer.
