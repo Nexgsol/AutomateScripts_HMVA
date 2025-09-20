@@ -298,6 +298,7 @@ def _resolve_character_and_voice(chosen_id: str, provided_voice_id: Optional[str
         v_id = provided_voice_id or look.get("default_voice_id") or None
         look_id = look.get("avatar_id") or look.get("id") or chosen_id
         return ctype, look_id, v_id
+<<<<<<< HEAD:core/tasks.py
     return "avatar", chosen_id, provided_voice_id
 
 
@@ -312,15 +313,145 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
 
     character_type, look_id, picked_voice = _resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
 
+=======
+    
+
+
+
+    
+import os
+import requests
+from celery import shared_task
+from django.utils import timezone
+from requests import HTTPError
+
+from core.models import ScriptRequest
+# from .integrations import avatar_heygen, tts_elevenlabs  # your adapters
+# avatar_heygen must expose:
+#   - upload_audio_asset(bytes, filename: str | None = None) -> str (audio_asset_id)
+#   - create_avatar_video_from_audio(avatar_id, audio_asset_id, title, width, height, transcript=None, accept_group_id=False) -> video_id
+#   - create_talking_photo_video_from_audio(talking_photo_id, audio_asset_id, title, width, height, transcript=None) -> video_id
+#   - create_avatar_video_from_text(avatar_id, input_text, voice_id, title, width, height, accept_group_id=False) -> video_id
+#   - create_talking_photo_video_from_text(talking_photo_id, input_text, voice_id, title, width, height) -> video_id
+#   - wait_for_video(video_id, timeout_sec=900, poll_sec=10) -> dict
+#   - get_share_url(video_id) -> str | None
+
+def _resolve_character_and_voice(avatar_or_group_id: str, heygen_voice_id: str | None):
+    """
+    Your existing resolver. Must return:
+    - character_type: "avatar" | "talking_photo"
+    - look_id: concrete avatar_id or talking_photo_id
+    - picked_voice: heygen voice id (can be None if not used for audio path)
+    """
+    # assuming you already have this function implemented
+    return avatar_heygen.resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
+
+def _fetch_bytes_from_url(url: str, timeout=60) -> bytes:
+    r = requests.get(url, stream=True, timeout=timeout)
+    r.raise_for_status()
+    chunks = []
+    for chunk in r.iter_content(8192):
+        if chunk:
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+@shared_task
+def task_render_heygen_tts(
+    sr_id: int,
+    avatar_or_group_id: str,
+    heygen_voice_id: str | None = None,
+    audio_url: str | None = None,          # NEW: remote audio already generated
+    audio_path: str | None = None,         # NEW: local audio path already generated
+    transcript: str | None = None,         # NEW: optional explicit transcript for captions
+):
+    """
+    Render via HeyGen. If pre-generated audio is provided, prefer the 'audio asset' pipeline.
+    Otherwise try HeyGen TTS-from-text; if HeyGen rejects, fallback to ElevenLabs TTS bytes.
+    Automatically chooses avatar vs talking_photo based on the selected look.
+    """
+    sr = ScriptRequest.objects.get(id=sr_id)
+
+
+    # Determine which text to send as captions/transcript (optional but helpful)
+    transcript_text = transcript or sr.final_script
+
+    # Resolve target look and voice
+    character_type, look_id, picked_voice = _resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
+
+    # --------------------------
+    # PATH A: PRE-GENERATED AUDIO
+    # --------------------------
+    audio_bytes: bytes | None = None
+    audio_filename = None
+
+    try:
+        if audio_url:
+            audio_bytes = _fetch_bytes_from_url(audio_url)
+            # give HeyGen a nicer filename hint (optional)
+            audio_filename = os.path.basename(audio_url.split("?")[0]) or "script_audio.mp3"
+
+        if not audio_bytes and audio_path and os.path.exists(audio_path):
+            with open(audio_path, "rb") as f:
+                audio_bytes = f.read()
+            audio_filename = os.path.basename(audio_path)
+
+        if audio_bytes:
+            audio_asset_id = avatar_heygen.upload_audio_asset(audio_bytes, filename=audio_filename)
+
+            if character_type == "avatar":
+                    video_id = avatar_heygen.create_avatar_video_from_audio(
+                    avatar_id=look_id,
+                    audio_asset_id=audio_asset_id,
+                    title=f"{sr.icon_or_topic} · req#{sr.id}",
+                    width=1080, height=1920,
+                    transcript=transcript_text,     # 👈 captions/search (optional)
+                    accept_group_id=False,
+                )
+            else:
+                    video_id = avatar_heygen.create_talking_photo_video_from_audio(
+                    talking_photo_id=look_id,
+                    audio_asset_id=audio_asset_id,
+                    title=f"{sr.icon_or_topic} · req#{sr.id}",
+                    width=1080, height=1920,
+                    transcript=transcript_text,     # 👈 captions/search (optional)
+                )
+
+            # wait + persist
+            st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
+            if st.get("status") != "completed":
+                sr.status = "Assembling"
+                sr.qc_json = {**(sr.qc_json or {}), "heygen_status": st}
+                sr.save()
+                return st
+
+            sr.asset_url = st.get("video_url", "")
+            sr.edit_url = avatar_heygen.get_share_url(video_id) or ""
+            sr.status = "Rendered"
+            sr.updated_at = timezone.now()
+            sr.save()
+            return {"video_url": sr.asset_url, "share_url": sr.edit_url}
+    except Exception as e:
+        # If audio path fails, just fall through to TTS path
+        sr.qc_json = {**(sr.qc_json or {}), "audio_pipeline_error": str(e)}
+        sr.save()
+
+    # ----------------------------------
+    # PATH B: HEYGEN TTS (TEXT -> VOICE)
+    # ----------------------------------
+>>>>>>> main:core/tasks/script_tasks.py
     try:
         if character_type == "avatar":
             video_id = avatar_heygen.create_avatar_video_from_text(
                 avatar_id=look_id,
-                input_text=sr.final_script,
-                voice_id=picked_voice,
+                input_text=sr.final_script,  # NOTE: plain text (not SSML)
+                voice_id=picked_voice,       # HeyGen voice id (linked to 11L if needed)
                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+<<<<<<< HEAD:core/tasks.py
                 width=1080,
                 height=1920,
+=======
+                width=1080, height=1920,
+>>>>>>> main:core/tasks/script_tasks.py
                 accept_group_id=False,
             )
         else:
@@ -333,17 +464,39 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
                 height=1920,
             )
     except HTTPError:
+<<<<<<< HEAD:core/tasks.py
         el_voice = getattr(sr.avatar, "elevenlabs_voice_id", None)
         mp3_bytes = tts_elevenlabs.synthesize_tts_bytes(sr.final_script, el_voice)
         audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes)
+=======
+        # -------------------------------------------------------------
+        # PATH C (fallback): ElevenLabs TTS -> upload audio -> render
+        # -------------------------------------------------------------
+        el_voice = getattr(getattr(sr, "avatar", None), "elevenlabs_voice_id", None) or getattr(sr, "elevenlabs_voice_id", None)
+
+        # synthesize bytes from plain text; if you have SSML, strip tags first or have
+        # tts_elevenlabs support SSML via input_format="ssml"
+        mp3_bytes = tts_elevenlabs.synthesize_tts_bytes(
+            text_or_ssml=sr.final_script,
+            voice_id=el_voice,
+            input_format="text",  # or "ssml" if you keep SSML pipeline here
+            output_format="mp3_44100_128",
+        )
+        audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes, filename=f"sr_{sr.id}.mp3")
+>>>>>>> main:core/tasks/script_tasks.py
 
         if character_type == "avatar":
             video_id = avatar_heygen.create_avatar_video_from_audio(
                 avatar_id=look_id,
                 audio_asset_id=audio_asset_id,
                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+<<<<<<< HEAD:core/tasks.py
                 width=1080,
                 height=1920,
+=======
+                width=1080, height=1920,
+                transcript=transcript_text,
+>>>>>>> main:core/tasks/script_tasks.py
                 accept_group_id=False,
             )
         else:
@@ -351,10 +504,18 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
                 talking_photo_id=look_id,
                 audio_asset_id=audio_asset_id,
                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+<<<<<<< HEAD:core/tasks.py
                 width=1080,
                 height=1920,
             )
 
+=======
+                width=1080, height=1920,
+                transcript=transcript_text,
+            )
+
+    # wait + persist (shared)
+>>>>>>> main:core/tasks/script_tasks.py
     st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
     if st.get("status") != "completed":
         sr.status = "Assembling"
@@ -370,6 +531,81 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
     return {"video_url": sr.asset_url, "share_url": sr.edit_url}
 
 
+# @shared_task
+# def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id: str | None = None):
+#     """
+#     Render via HeyGen using TTS first; if HeyGen rejects, fall back to audio pipeline.
+#     Automatically chooses avatar vs talking_photo based on the selected look.
+#     """
+#     sr = ScriptRequest.objects.get(id=sr_id)
+
+#     # Ensure we have text
+#     if not sr.final_script:
+#         sr.final_script = avatar_heygen.generate_heritage_paragraph(sr.icon_or_topic, sr.notes or "")
+#         sr.status = "Drafted"
+#         sr.save()
+
+#     # Decide character type + final look id + voice
+#     character_type, look_id, picked_voice = _resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
+#     print("type", character_type)
+
+#     # --- Try TTS path first ---
+#     try:
+#         if character_type == "avatar":
+#             video_id = avatar_heygen.create_avatar_video_from_text(
+#                 avatar_id=look_id,
+#                 input_text=sr.final_script,
+#                 voice_id=picked_voice,
+#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+#                 width=1080, height=1920,
+#                 accept_group_id=False,   # already resolved to a look id
+#             )
+#         else:
+#             video_id = avatar_heygen.create_talking_photo_video_from_text(
+#                 talking_photo_id=look_id,
+#                 input_text=sr.final_script,
+#                 voice_id=picked_voice,
+#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+#                 width=1080, height=1920,
+#             )
+#     except HTTPError as e:
+#         # --- Fallback: ElevenLabs TTS -> upload audio -> render via audio asset ---
+#         el_voice = getattr(sr.avatar, "elevenlabs_voice_id", None)
+#         mp3_bytes = tts_elevenlabs.synthesize_tts_bytes(sr.final_script, el_voice)  # see adapter change below
+#         audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes)
+
+#         if character_type == "avatar":
+#             video_id = avatar_heygen.create_avatar_video_from_audio(
+#                 avatar_id=look_id,
+#                 audio_asset_id=audio_asset_id,
+#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+#                 width=1080, height=1920,
+#                 accept_group_id=False,
+#             )
+#         else:
+#             video_id = avatar_heygen.create_talking_photo_video_from_audio(
+#                 talking_photo_id=look_id,
+#                 audio_asset_id=audio_asset_id,
+#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
+#                 width=1080, height=1920,
+#             )
+
+#     # Wait and persist
+#     st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
+#     if st.get("status") != "completed":
+#         sr.status = "Assembling"
+#         sr.qc_json = {**(sr.qc_json or {}), "heygen_status": st}
+#         sr.save()
+#         return st
+
+#     sr.asset_url = st.get("video_url", "")
+#     sr.edit_url = avatar_heygen.get_share_url(video_id) or ""
+#     sr.status = "Rendered"
+#     sr.updated_at = timezone.now()
+#     sr.save()
+#     return {"video_url": sr.asset_url, "share_url": sr.edit_url}
+
+
 @shared_task
 def task_kickoff_chain(sr_id: int):
     flow = chain(
@@ -382,6 +618,7 @@ def task_kickoff_chain(sr_id: int):
         task_schedule.si(sr_id),
     )
     flow.delay()
+<<<<<<< HEAD:core/tasks.py
     return {"pipeline": "queued", "sr_id": sr_id}
 
 # ====================== Batch Paragraph Generation ======================
@@ -604,3 +841,6 @@ def orchestrate_paragraphs_job(
         "batches": total_batches,
         "mode": mode,
     }
+=======
+    return {"pipeline": "queued", "sr_id": sr_id}
+>>>>>>> main:core/tasks/script_tasks.py

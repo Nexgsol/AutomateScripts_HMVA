@@ -1,5 +1,6 @@
 import json
 import re
+<<<<<<< HEAD
 import datetime
 from typing import Dict
 from zoneinfo import ZoneInfo
@@ -8,42 +9,25 @@ from core.adapters import llm_openai
 from core.prompts import BASE_SCRIPT_SYSTEM, PROMPT_TEMPLATE, base_script_user
 
 
+=======
+from typing import Dict
+
+from .prompts import BASE_SCRIPT_SYSTEM, base_script_user
+# If you don't have these helpers elsewhere, keep them here:
+
+
+
+
+import re, datetime
+from zoneinfo import ZoneInfo
+from .adapters import llm_openai
+>>>>>>> main
 
 def word_range(duration: str):
     return {"15s": (60,75), "30s": (90,120), "60s": (150,180)}.get(duration, (90,120))
 
 def llm_chat(system, user, temp=0.5):
     return llm_openai.chat(system, user, temp)
-
-def call_openai_for_ssml(prompt):
-    """
-    Calls OpenAI's API via llm_openai.chat to convert text to SSML format.
-    Returns the SSML string.
-    """
-    system = """You are an assistant that converts plain text into VALID, production-ready SSML for speech synthesis (ElevenLabs-compatible).Hard requirements:
-    - Return ONE <speak> block ONLY. No code fences, no explanations, no XML declaration.
-    - Use <prosody rate="medium"> for the wrapper unless specified.
-    - Use <break> with milliseconds (120–500ms) to create natural pacing between beats.
-    - Use <emphasis level="moderate"> to highlight 1–3 key phrases only.
-    - Convert years to <say-as interpret-as="date" format="y">YYYY</say-as> and integers to <say-as interpret-as="cardinal">N</say-as> where appropriate.
-    - Keep sentences 8–22 words for rhythm. Vary lengths slightly.
-    - Do NOT invent content; preserve meaning and order. Lightly segment long sentences for clarity.
-    - Escape special characters (&, <, >) if present in the input.
-    - End with <mark name="END"/> just before closing </speak>.
-    - No <audio> tags, no SSML comments, no vendor-specific tags.
-
-    Voice guidance (implicit, do not output as text):
-    - Tone: modern, confident, understated.
-    - Diction: clean and warm; avoid hype.
-
-    If the input already contains SSML, rebuild it into a single clean, standards-compliant block following the same rules.
-    """
-    user = prompt
-    try:
-        ssml = llm_openai.chat(system, user, temperature=0.2)
-        return ssml
-    except Exception as e:
-        return f"Error: {str(e)}"
 
 def count_words(t): return len(re.findall(r"\b[\w’']+\b", t))
 def first_sentence(t):
@@ -119,11 +103,10 @@ def generate_heritage_paragraph(icon_name: str, notes: str) -> str:
         text = re.sub(r'\s{2,}', ' ', text).strip()
     return text
 
-def compose_icon_for_prompt(icon: str, category: str | None = None) -> str:
-    icon = (icon or "").strip()
-    category = (category or "").strip()
-    return f"{icon} ({category})" if icon and category else icon
+_WS_NEWLINES = re.compile(r'\s*\n+\s*')
+_MULTI_WS = re.compile(r'\s{2,}')
 
+<<<<<<< HEAD
 
 def word_range_for_duration(duration: str) -> tuple[int, int]:
     duration_map = {
@@ -138,36 +121,43 @@ def build_prompt(icon: str, notes: str = "", category: str | None = None) -> str
     duration="30"  # Default duration; modify as needed
     lo, hi = word_range_for_duration(duration)
     return PROMPT_TEMPLATE.format(icon=icon_for_prompt, notes=(notes or "").strip(), lo=lo, hi=hi)
+=======
+def _normalize_one_paragraph(text: str) -> str:
+    text = text.strip()
+    text = _WS_NEWLINES.sub(' ', text)
+    text = _MULTI_WS.sub(' ', text).strip()
+    # squash multiple paragraphs if any slipped in
+    parts = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+    if len(parts) > 1:
+        text = ' '.join(parts)
+    return text
+>>>>>>> main
 
-def parse_openai_json(raw: str) -> tuple[str, str]:
+def _coerce_json(raw: str) -> Dict:
+    """
+    Best-effort JSON extraction:
+    - Try json.loads
+    - If it fails, pull first {...} block and try again
+    - Finally, wrap into expected schema if it's just a plain paragraph
+    """
     try:
-        data = json.loads(raw)
-        return str(data.get("paragraph", "")), str(data.get("ssml", ""))
+        return json.loads(raw)
     except Exception:
-        return (raw or ""), ""
+        pass
 
-def iter_rows_streaming(file_like_or_path, sheet=None):
-    """
-    Stream normalized rows from a large .xlsx without loading the whole sheet.
-    Yields dicts: {"row": excel_row_number, "icon", "category", "notes"}.
-    - file_like_or_path: file path or Django UploadedFile / file-like object
-    - sheet: None=first sheet, or sheet index, or sheet name
-    """
-    from openpyxl import load_workbook
-
-    # open from file path or file-like
-    if hasattr(file_like_or_path, "read"):
-        fh = file_like_or_path
+    # Try to extract the outermost JSON object
+    m = re.search(r'\{.*\}', raw, flags=re.DOTALL)
+    if m:
         try:
-            fh.seek(0)
+            return json.loads(m.group(0))
         except Exception:
             pass
-        wb = load_workbook(fh, read_only=True, data_only=True)
-    else:
-        wb = load_workbook(file_like_or_path, read_only=True, data_only=True)
 
-    ws = wb.worksheets[0] if sheet is None else (wb.worksheets[sheet] if isinstance(sheet, int) else wb[sheet])
+    # If the model returned only the paragraph, coerce it
+    coerced = _normalize_one_paragraph(raw)
+    return {"paragraph": coerced, "ssml": ""}
 
+<<<<<<< HEAD
     def _canon(s: str) -> str:
         return (s or "").strip().lower().replace("_", " ").replace("-", " ")
 
@@ -228,10 +218,22 @@ def batch(iterable, size: int):
 
 
 def call_openai_for_paragraph_and_ssml(prompt: str) -> str:
+=======
+def generate_heritage_paragraph_with_ssml(
+    icon_name: str,
+    notes: str,
+    duration: str,
+    temp: float = 0.5,
+) -> Dict[str, str]:
+>>>>>>> main
     """
-    Calls OpenAI once with both paragraph + SSML instructions.
-    Returns raw JSON string (the model must output strictly JSON).
+    Generates a single documentary-style paragraph (120–160 words) AND
+    a production-ready SSML version in one call.
+
+    Returns:
+        {"paragraph": "...", "ssml": "<speak>...</speak>"}
     """
+<<<<<<< HEAD
     system = (
         "You are a senior fashion copywriter AND an SSML engineer.\n"
         "Return ONLY a single JSON object (no extra commentary, no markdown)."
@@ -307,6 +309,12 @@ def generate_heritage_paragraph_with_ssml(
     # raw = llm_chat(BASE_SCRIPT_SYSTEM, user_prompt, temp=temp)
     prompt = build_prompt(icon=icon_name, notes=notes, category=category)
     raw = call_openai_for_paragraph_and_ssml(prompt)
+=======
+    # Build user prompt (the base prompt should already ask for JSON with both fields)
+    user_prompt = base_script_user(icon_name, notes, duration)
+
+    raw = llm_chat(BASE_SCRIPT_SYSTEM, user_prompt, temp=temp)
+>>>>>>> main
     data = _coerce_json(raw)
 
     # Normalize and guard the paragraph

@@ -1,5 +1,4 @@
 # core/adapters/avatar_heygen.py
-
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
 import os
@@ -11,7 +10,7 @@ API_BASE = "https://api.heygen.com"
 UPLOAD_BASE = "https://upload.heygen.com"
 
 
-# -------------------- helpers --------------------
+# -------------------- Errors & Headers --------------------
 
 class HeyGenError(Exception):
     pass
@@ -23,6 +22,8 @@ def _headers(as_json: bool = False) -> Dict[str, str]:
         h["Content-Type"] = "application/json"
     return h
 
+
+# -------------------- HTTP helpers --------------------
 
 def _json_get(url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 60) -> Dict[str, Any]:
     if not HEYGEN_API_KEY:
@@ -44,7 +45,6 @@ def _json_post(url: str, payload: Dict[str, Any], timeout: int = 180) -> Dict[st
             body = r.json()
         except Exception:
             body = r.text
-        # dump helpful info to worker logs
         print("[HeyGen ERROR]", r.status_code, url)
         print("[HeyGen ERROR body]", body)
         print("[HeyGen ERROR payload]", payload)
@@ -52,6 +52,7 @@ def _json_post(url: str, payload: Dict[str, Any], timeout: int = 180) -> Dict[st
     return r.json() or {}
 
 
+# -------------------- Voices & Avatars --------------------
 
 def list_voices() -> List[Dict[str, Any]]:
     """
@@ -80,8 +81,6 @@ def list_voices() -> List[Dict[str, Any]]:
         })
     return out
 
-
-# -------- LIST ALL LOOKS (flattened) --------
 
 def list_group_looks(group_id: str) -> List[Dict[str, Any]]:
     """
@@ -171,117 +170,63 @@ def list_avatars(include_public: bool = False, group_ids: Optional[List[str]] = 
 
     return out
 
-# -------- VIDEO CREATION HELPERS --------
 
-def create_avatar_video_from_text(*, avatar_id: str, input_text: str, voice_id: Optional[str] = None,
-                                  title: str = "", width: int = 1080, height: int = 1920,
-                                  background_color: str = "#000000", accept_group_id: bool = False) -> str:
+# core/adapters/avatar_heygen.py
+
+def get_avatar_info(avatar_id: str) -> Dict[str, Any]:
     """
-    Motion avatar (character.type='avatar')
+    Fetch avatar/talking_photo detail.
+    Returns a minimal dict: { "avatar_id", "type", "default_voice_id", "name", ... }
     """
-    # Note: accept_group_id kept for backward compat; if True, resolve to first look
-    if accept_group_id and len(avatar_id) == 32:  # crude: group ids are often 32 hex chars
-        looks = list_group_looks(avatar_id)
+    if not HEYGEN_API_KEY:
+        # fallback stub
+        return {"avatar_id": avatar_id, "type": "avatar", "default_voice_id": None}
+
+    url = f"{API_BASE}/v2/avatar/{avatar_id}/details"
+    j = _json_get(url) or {}
+    d = (j.get("data") or {}) if isinstance(j, dict) else {}
+
+    # Normalize fields
+    return {
+        "avatar_id": d.get("id") or avatar_id,
+        "type": d.get("type") or "avatar",  # "avatar" | "talking_photo"
+        "name": d.get("name"),
+        "default_voice_id": d.get("default_voice_id"),
+        "preview_image_url": d.get("preview_image_url") or d.get("image_url"),
+        "preview_video_url": d.get("preview_video_url") or d.get("motion_preview_url"),
+        "is_public": d.get("is_public"),
+        "premium": d.get("premium"),
+    }
+
+
+def resolve_avatar_id(avatar_or_group_id: str) -> Tuple[str, Optional[str]]:
+    """
+    If a group id is provided, resolve to the first look in that group.
+    Returns (avatar_id, default_voice_id)
+    """
+    aid = avatar_or_group_id
+    # crude heuristic (many group ids are 32 hex chars)
+    if len(aid) == 32:
+        looks = list_group_looks(aid)
         if looks:
-            avatar_id = looks[0]["avatar_id"]
-
-    payload = {
-        "title": title or "Heritage Reel",
-        "video_inputs": [
-            {
-                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
-                "voice": {"type": "text", "input_text": input_text, "voice_id": voice_id} if input_text else None,
-                "background": {"type": "color", "value": background_color},
-            }
-        ],
-        "dimension": {"width": width, "height": height},
-        "test": False,
-        "callback_id": None,
-        "aspect_ratio": None,
-    }
-    # remove None voice if ever called with empty input_text
-    if payload["video_inputs"][0]["voice"] is None:
-        del payload["video_inputs"][0]["voice"]
-    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
-    return (j.get("data") or {}).get("video_id", "")
+            first = looks[0]
+            return first["avatar_id"], first.get("default_voice_id") or None
+    return aid, None
 
 
-def create_avatar_video_from_audio(*, avatar_id: str, audio_asset_id: str,
-                                   title: str = "", width: int = 1080, height: int = 1920,
-                                   background_color: str = "#000000", accept_group_id: bool = False) -> str:
-    if accept_group_id and len(avatar_id) == 32:
-        looks = list_group_looks(avatar_id)
-        if looks:
-            avatar_id = looks[0]["avatar_id"]
+# -------------------- Audio Upload --------------------
 
-    payload = {
-        "title": title or "Heritage Reel",
-        "video_inputs": [
-            {
-                "character": {"type": "avatar", "avatar_id": avatar_id, "avatar_style": "normal"},
-                "voice": {"type": "audio", "audio_asset_id": audio_asset_id},
-                "background": {"type": "color", "value": background_color},
-            }
-        ],
-        "dimension": {"width": width, "height": height},
-        "test": False,
-        "callback_id": None,
-        "aspect_ratio": None,
-    }
-    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
-    return (j.get("data") or {}).get("video_id", "")
-
-
-def create_talking_photo_video_from_text(*, talking_photo_id: str, input_text: str, voice_id: Optional[str] = None,
-                                         title: str = "", width: int = 1080, height: int = 1920,
-                                         background_color: str = "#000000") -> str:
+def upload_audio_asset(mp3_bytes: bytes, filename: Optional[str] = None, content_type: str = "audio/mpeg") -> str:
     """
-    Photo look (character.type='talking_photo')
+    Upload raw audio bytes to HeyGen asset storage.
+    Returns: audio asset id (str).
     """
-    payload = {
-        "title": title or "Heritage Reel",
-        "video_inputs": [
-            {
-                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
-                "voice": {"type": "text", "input_text": input_text, "voice_id": voice_id},
-                "background": {"type": "color", "value": background_color},
-            }
-        ],
-        "dimension": {"width": width, "height": height},
-        "test": False,
-        "callback_id": None,
-        "aspect_ratio": None,
-    }
-    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
-    return (j.get("data") or {}).get("video_id", "")
-
-
-def create_talking_photo_video_from_audio(*, talking_photo_id: str, audio_asset_id: str,
-                                          title: str = "", width: int = 1080, height: int = 1920,
-                                          background_color: str = "#000000") -> str:
-    payload = {
-        "title": title or "Heritage Reel",
-        "video_inputs": [
-            {
-                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
-                "voice": {"type": "audio", "audio_asset_id": audio_asset_id},
-                "background": {"type": "color", "value": background_color},
-            }
-        ],
-        "dimension": {"width": width, "height": height},
-        "test": False,
-        "callback_id": None,
-        "aspect_ratio": None,
-    }
-    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
-    return (j.get("data") or {}).get("video_id", "")
-
-
-def upload_audio_asset(mp3_bytes: bytes) -> str:
     if not HEYGEN_API_KEY:
         return "asset_stub_audio"
     url = f"{UPLOAD_BASE}/v1/asset"
-    headers = {"X-Api-Key": HEYGEN_API_KEY, "Content-Type": "audio/mpeg"}
+    headers = {"X-Api-Key": HEYGEN_API_KEY, "Content-Type": content_type}
+    if filename:
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
     r = requests.post(url, headers=headers, data=mp3_bytes, timeout=180)
     if r.status_code >= 400:
         try:
@@ -294,7 +239,33 @@ def upload_audio_asset(mp3_bytes: bytes) -> str:
     return (r.json().get("data") or {}).get("id", "")
 
 
-# -------------------- video creation (audio OR text) --------------------
+def upload_audio_asset_from_url(audio_url: str, filename: Optional[str] = None, timeout: int = 180) -> str:
+    """
+    Downloads audio from a URL and uploads it as an asset.
+    Returns: audio asset id (str).
+    """
+    if not HEYGEN_API_KEY:
+        return "asset_stub_audio"
+
+    dr = requests.get(audio_url, stream=True, timeout=timeout)
+    dr.raise_for_status()
+    chunks = []
+    for chunk in dr.iter_content(8192):
+        if chunk:
+            chunks.append(chunk)
+    data = b"".join(chunks)
+
+    ct = dr.headers.get("Content-Type", "audio/mpeg")
+    if not filename:
+        try:
+            filename = os.path.basename(audio_url.split("?", 1)[0]) or "audio.mp3"
+        except Exception:
+            filename = "audio.mp3"
+
+    return upload_audio_asset(data, filename=filename, content_type=ct)
+
+
+# -------------------- Video Creation (avatar/talking_photo) --------------------
 
 def create_avatar_video(
     avatar_id: str,
@@ -321,10 +292,8 @@ def create_avatar_video(
     if not (audio_asset_id or input_text):
         raise ValueError("Provide either audio_asset_id (audio mode) or input_text (TTS mode).")
 
-    # Resolve group → look id if allowed
     final_avatar_id, default_voice = resolve_avatar_id(avatar_id) if accept_group_id else (avatar_id, None)
 
-    # Voice block
     if audio_asset_id:
         voice_block: Dict[str, Any] = {"type": "audio", "audio_asset_id": audio_asset_id}
     else:
@@ -332,7 +301,6 @@ def create_avatar_video(
         if voice_id or default_voice:
             voice_block["voice_id"] = voice_id or default_voice
 
-    # Background
     background = {"type": "image", "image_url": background_image_url} if background_image_url else {"type": "color", "value": background_color}
 
     payload = {
@@ -343,6 +311,9 @@ def create_avatar_video(
             "background": background,
         }],
         "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
     }
 
     url = f"{API_BASE}/v2/video/generate"
@@ -367,9 +338,67 @@ def create_avatar_video_from_text(
     return create_avatar_video(avatar_id, input_text=input_text, voice_id=voice_id, **kwargs)
 
 
-# -------------------- status & share --------------------
+def create_talking_photo_video_from_text(
+    *,
+    talking_photo_id: str,
+    input_text: str,
+    voice_id: Optional[str] = None,
+    title: str = "Heritage Reel",
+    width: int = 1080,
+    height: int = 1920,
+    background_color: str = "#000000",
+) -> str:
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
+                "voice": {"type": "text", "input_text": input_text, "voice_id": voice_id},
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
+    }
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
+
+
+def create_talking_photo_video_from_audio(
+    *,
+    talking_photo_id: str,
+    audio_asset_id: str,
+    title: str = "Heritage Reel",
+    width: int = 1080,
+    height: int = 1920,
+    background_color: str = "#00FF00",
+) -> str:
+    payload = {
+        "title": title or "Heritage Reel",
+        "video_inputs": [
+            {
+                "character": {"type": "talking_photo", "talking_photo_id": talking_photo_id},
+                "voice": {"type": "audio", "audio_asset_id": audio_asset_id},
+                "background": {"type": "color", "value": background_color},
+            }
+        ],
+        "dimension": {"width": width, "height": height},
+        "test": False,
+        "callback_id": None,
+        "aspect_ratio": None,
+    }
+    j = _json_post(f"{API_BASE}/v2/video/generate", payload, timeout=180)
+    return (j.get("data") or {}).get("video_id", "")
+
+
+# -------------------- Status & Share --------------------
 
 def get_video_status(video_id: str) -> dict:
+    """
+    v1 status endpoint remains widely used and stable in tenants.
+    """
     if not HEYGEN_API_KEY:
         return {"status": "completed", "video_url": "https://example.com/video/avatar.mp4"}
     url = f"{API_BASE}/v1/video_status.get"
