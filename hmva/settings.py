@@ -5,7 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-key")
 DEBUG = True
 ALLOWED_HOSTS = "ALLOWED_HOSTS", "automatescriptshmva-production.up.railway.app, localhost,127.0.0.1"
-CSRF_TRUSTED_ORIGINS = "CSRF_TRUSTED_ORIGINS", "https://automatescriptshmva-production.up.railway.app/"
+CSRF_TRUSTED_ORIGINS = "https://automatescriptshmva-production.up.railway.app"
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind Render proxy
 
