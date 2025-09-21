@@ -1,6 +1,5 @@
 import json
 import re
-<<<<<<< HEAD
 import datetime
 from typing import Dict
 from zoneinfo import ZoneInfo
@@ -9,19 +8,6 @@ from core.adapters import llm_openai
 from core.prompts import BASE_SCRIPT_SYSTEM, PROMPT_TEMPLATE, base_script_user
 
 
-=======
-from typing import Dict
-
-from .prompts import BASE_SCRIPT_SYSTEM, base_script_user
-# If you don't have these helpers elsewhere, keep them here:
-
-
-
-
-import re, datetime
-from zoneinfo import ZoneInfo
-from .adapters import llm_openai
->>>>>>> main
 
 def word_range(duration: str):
     return {"15s": (60,75), "30s": (90,120), "60s": (150,180)}.get(duration, (90,120))
@@ -106,7 +92,6 @@ def generate_heritage_paragraph(icon_name: str, notes: str) -> str:
 _WS_NEWLINES = re.compile(r'\s*\n+\s*')
 _MULTI_WS = re.compile(r'\s{2,}')
 
-<<<<<<< HEAD
 
 def word_range_for_duration(duration: str) -> tuple[int, int]:
     duration_map = {
@@ -121,17 +106,6 @@ def build_prompt(icon: str, notes: str = "", category: str | None = None) -> str
     duration="30"  # Default duration; modify as needed
     lo, hi = word_range_for_duration(duration)
     return PROMPT_TEMPLATE.format(icon=icon_for_prompt, notes=(notes or "").strip(), lo=lo, hi=hi)
-=======
-def _normalize_one_paragraph(text: str) -> str:
-    text = text.strip()
-    text = _WS_NEWLINES.sub(' ', text)
-    text = _MULTI_WS.sub(' ', text).strip()
-    # squash multiple paragraphs if any slipped in
-    parts = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
-    if len(parts) > 1:
-        text = ' '.join(parts)
-    return text
->>>>>>> main
 
 def _coerce_json(raw: str) -> Dict:
     """
@@ -157,7 +131,6 @@ def _coerce_json(raw: str) -> Dict:
     coerced = _normalize_one_paragraph(raw)
     return {"paragraph": coerced, "ssml": ""}
 
-<<<<<<< HEAD
     def _canon(s: str) -> str:
         return (s or "").strip().lower().replace("_", " ").replace("-", " ")
 
@@ -218,14 +191,6 @@ def batch(iterable, size: int):
 
 
 def call_openai_for_paragraph_and_ssml(prompt: str) -> str:
-=======
-def generate_heritage_paragraph_with_ssml(
-    icon_name: str,
-    notes: str,
-    duration: str,
-    temp: float = 0.5,
-) -> Dict[str, str]:
->>>>>>> main
     """
     Generates a single documentary-style paragraph (120–160 words) AND
     a production-ready SSML version in one call.
@@ -233,7 +198,6 @@ def generate_heritage_paragraph_with_ssml(
     Returns:
         {"paragraph": "...", "ssml": "<speak>...</speak>"}
     """
-<<<<<<< HEAD
     system = (
         "You are a senior fashion copywriter AND an SSML engineer.\n"
         "Return ONLY a single JSON object (no extra commentary, no markdown)."
@@ -309,12 +273,6 @@ def generate_heritage_paragraph_with_ssml(
     # raw = llm_chat(BASE_SCRIPT_SYSTEM, user_prompt, temp=temp)
     prompt = build_prompt(icon=icon_name, notes=notes, category=category)
     raw = call_openai_for_paragraph_and_ssml(prompt)
-=======
-    # Build user prompt (the base prompt should already ask for JSON with both fields)
-    user_prompt = base_script_user(icon_name, notes, duration)
-
-    raw = llm_chat(BASE_SCRIPT_SYSTEM, user_prompt, temp=temp)
->>>>>>> main
     data = _coerce_json(raw)
 
     # Normalize and guard the paragraph
