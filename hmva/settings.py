@@ -4,29 +4,26 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-key")
 DEBUG = True
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", ".up.railway.app,localhost,127.0.0.1").split(",")
-CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://*.up.railway.app").split(",")
+ALLOWED_HOSTS = "ALLOWED_HOSTS", "automatescriptshmva-production.up.railway.app, localhost,127.0.0.1"
+CSRF_TRUSTED_ORIGINS = "CSRF_TRUSTED_ORIGINS", "https://automatescriptshmva-production.up.railway.app/"
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # behind Render proxy
-CSRF_COOKIE_SECURE = True
+
+# redirect http->https at Django level (safe behind Railway)
+SECURE_SSL_REDIRECT = True
+
+# secure cookies
 SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
-if not DEBUG:
-    # redirect http->https at Django level (safe behind Railway)
-    SECURE_SSL_REDIRECT = True
+# HSTS (enable once you’re sure HTTPS is permanent!)
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))  # 1 year
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "true").lower() == "true"
+SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "false").lower() == "true"
 
-    # secure cookies
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-
-    # HSTS (enable once you’re sure HTTPS is permanent!)
-    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))  # 1 year
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv("SECURE_HSTS_INCLUDE_SUBDOMAINS", "true").lower() == "true"
-    SECURE_HSTS_PRELOAD = os.getenv("SECURE_HSTS_PRELOAD", "false").lower() == "true"
-
-    # extra hardening (optional)
-    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
-    X_FRAME_OPTIONS = "DENY"
+# extra hardening (optional)
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+X_FRAME_OPTIONS = "DENY"
 
 INSTALLED_APPS = [
     "django.contrib.admin","django.contrib.auth","django.contrib.contenttypes",
