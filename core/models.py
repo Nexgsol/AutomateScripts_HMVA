@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from django.utils import timezone
 
@@ -106,4 +107,25 @@ class Icon(models.Model):
         return self.name
 
 
+class JobRun(models.Model):
+    job_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    state = models.CharField(max_length=32, default="PENDING")
+    mode = models.CharField(max_length=32, blank=True, default="")
+    file_path = models.CharField(max_length=512, blank=True, default="")
+    sheet_name = models.CharField(max_length=128, blank=True, default="")
+    results_path = models.CharField(max_length=512, blank=True, default="")
+    download_url = models.CharField(max_length=1024, blank=True, default="")
+    batches = models.IntegerField(default=0)
+    error = models.TextField(blank=True, default="")
 
+    # NEW: final callback task id for chords
+    handoff_id = models.CharField(max_length=128, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "core_job_run"
+
+    def __str__(self):
+        return f"{self.job_id} [{self.state}]"

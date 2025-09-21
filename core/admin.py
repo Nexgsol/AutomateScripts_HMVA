@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Brand, AvatarProfile, Icon, Template, PublishTarget, ScriptRequest
+from .models import Brand, AvatarProfile, Icon, JobRun, Template, PublishTarget, ScriptRequest
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
@@ -34,3 +34,10 @@ class IconAdmin(admin.ModelAdmin):
         text = (obj.short_cues or "").strip()
         return (text[:80] + "…") if len(text) > 80 else text
     short_cues_preview.short_description = "Notes"
+    
+@admin.register(JobRun)
+class JobRunAdmin(admin.ModelAdmin):
+    list_display = ("job_id", "mode", "state", "created_at")
+    search_fields = ("job_id", "mode", "state")
+    list_filter = ("state",)
+    ordering = ("created_at",)

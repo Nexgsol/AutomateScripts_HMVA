@@ -18,6 +18,7 @@ from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from requests.exceptions import HTTPError
 
+from core.jobs import job_get_or_create, job_set_state, job_touch
 from core.models import ScriptRequest, PublishTarget
 from core.prompts import (
     GENERATOR_SYSTEM,
@@ -316,8 +317,8 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
         if character_type == "avatar":
             video_id = avatar_heygen.create_avatar_video_from_text(
                 avatar_id=look_id,
-                input_text=sr.final_script,  # NOTE: plain text (not SSML)
-                voice_id=picked_voice,       # HeyGen voice id (linked to 11L if needed)
+                input_text=sr.final_script,
+                voice_id=picked_voice,
                 title=f"{sr.icon_or_topic} · req#{sr.id}",
                 width=1080,
                 height=1920,
@@ -368,81 +369,6 @@ def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id:
     sr.updated_at = timezone.now()
     sr.save()
     return {"video_url": sr.asset_url, "share_url": sr.edit_url}
-
-
-# @shared_task
-# def task_render_heygen_tts(sr_id: int, avatar_or_group_id: str, heygen_voice_id: str | None = None):
-#     """
-#     Render via HeyGen using TTS first; if HeyGen rejects, fall back to audio pipeline.
-#     Automatically chooses avatar vs talking_photo based on the selected look.
-#     """
-#     sr = ScriptRequest.objects.get(id=sr_id)
-
-#     # Ensure we have text
-#     if not sr.final_script:
-#         sr.final_script = avatar_heygen.generate_heritage_paragraph(sr.icon_or_topic, sr.notes or "")
-#         sr.status = "Drafted"
-#         sr.save()
-
-#     # Decide character type + final look id + voice
-#     character_type, look_id, picked_voice = _resolve_character_and_voice(avatar_or_group_id, heygen_voice_id)
-#     print("type", character_type)
-
-#     # --- Try TTS path first ---
-#     try:
-#         if character_type == "avatar":
-#             video_id = avatar_heygen.create_avatar_video_from_text(
-#                 avatar_id=look_id,
-#                 input_text=sr.final_script,
-#                 voice_id=picked_voice,
-#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
-#                 width=1080, height=1920,
-#                 accept_group_id=False,   # already resolved to a look id
-#             )
-#         else:
-#             video_id = avatar_heygen.create_talking_photo_video_from_text(
-#                 talking_photo_id=look_id,
-#                 input_text=sr.final_script,
-#                 voice_id=picked_voice,
-#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
-#                 width=1080, height=1920,
-#             )
-#     except HTTPError as e:
-#         # --- Fallback: ElevenLabs TTS -> upload audio -> render via audio asset ---
-#         el_voice = getattr(sr.avatar, "elevenlabs_voice_id", None)
-#         mp3_bytes = tts_elevenlabs.synthesize_tts_bytes(sr.final_script, el_voice)  # see adapter change below
-#         audio_asset_id = avatar_heygen.upload_audio_asset(mp3_bytes)
-
-#         if character_type == "avatar":
-#             video_id = avatar_heygen.create_avatar_video_from_audio(
-#                 avatar_id=look_id,
-#                 audio_asset_id=audio_asset_id,
-#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
-#                 width=1080, height=1920,
-#                 accept_group_id=False,
-#             )
-#         else:
-#             video_id = avatar_heygen.create_talking_photo_video_from_audio(
-#                 talking_photo_id=look_id,
-#                 audio_asset_id=audio_asset_id,
-#                 title=f"{sr.icon_or_topic} · req#{sr.id}",
-#                 width=1080, height=1920,
-#             )
-
-#     # Wait and persist
-#     st = avatar_heygen.wait_for_video(video_id, timeout_sec=900, poll_sec=10)
-#     if st.get("status") != "completed":
-#         sr.status = "Assembling"
-#         sr.qc_json = {**(sr.qc_json or {}), "heygen_status": st}
-#         sr.save()
-#         return st
-
-#     sr.asset_url = st.get("video_url", "")
-#     sr.edit_url = avatar_heygen.get_share_url(video_id) or ""
-#     sr.status = "Rendered"
-#     sr.updated_at = timezone.now()
-#     sr.save()
-#     return {"video_url": sr.asset_url, "share_url": sr.edit_url}
 
 
 @shared_task
@@ -500,32 +426,48 @@ def process_row_task(self, row_dict: dict) -> dict:
 @shared_task(bind=True)
 def save_batch_task(
     self,
-    batch_results: list,
+    batch_results,
     job_id: str,
     batch_no: int,
     results_path: str,
-    # NEW (optional) — for Google Sheet write-back
     mode: Optional[str] = None,
     sheet_id: Optional[str] = None,
     sheet_name: Optional[str] = None,
 ) -> dict:
     """
     Appends batch_results to an XLSX file (always),
-    and if mode == "google_sheet" and sheet_id/sheet_name are provided,
-    writes Paragraph + SSML back to the Google Sheet for the exact rows.
+    and optionally writes back to Google Sheets.
+    Accepts either:
+      - list[dict]  (normal chord header with N>1)
+      - dict        (some brokers optimize single-header chord to a single item)
     """
+    # --- Coerce chord header result to list if needed ---
+    if isinstance(batch_results, dict):
+        batch_results = [batch_results]
+    elif not isinstance(batch_results, list):
+        # last-resort normalization; some exotic cases return tuple
+        try:
+            batch_results = list(batch_results)
+        except Exception:
+            raise TypeError(
+                f"save_batch_task expected list or dict for batch_results, got {type(batch_results).__name__}: {batch_results!r}"
+            )
+
+    # Ensure every item is a dict
+    for i, item in enumerate(batch_results):
+        if not isinstance(item, dict):
+            raise TypeError(f"batch_results[{i}] must be dict, got {type(item).__name__}: {item!r}")
+
     # Sort for deterministic append order
     batch_results = sorted(batch_results, key=lambda x: x.get("row", 0))
 
     # ---- 1) Append to results workbook
     abs_results = _abs_and_ensure_parent(results_path)
     if not os.path.exists(abs_results):
-        wb = Workbook()
-        ws = wb.active
+        wb = Workbook(); ws = wb.active
         ws.append(["row", "icon", "category", "notes", "paragraph", "ssml"])
     else:
-        wb = load_workbook(abs_results)
-        ws = wb.active
+        wb = load_workbook(abs_results); ws = wb.active
 
     for item in batch_results:
         ws.append([
@@ -542,24 +484,16 @@ def save_batch_task(
     if (mode or "").lower() == "google_sheet" and sheet_id and sheet_name and batch_results:
         try:
             sheets = _sheets_client()
-            # Ensure headers and get column map
             colmap = _ensure_sheet_headers_and_map(sheets, sheet_id, sheet_name, ["Paragraph", "SSML"])
-            p_col = colmap["Paragraph"]
-            s_col = colmap["SSML"]
-
-            # Stage ranges to batchUpdate
+            p_col, s_col = colmap["Paragraph"], colmap["SSML"]
             data = []
             for item in batch_results:
-                rownum = int(item.get("row", 0) or 0)
-                if rownum < 2:
-                    continue
-                paragraph = (item.get("paragraph") or "").strip()
-                ssml = (item.get("ssml") or "").strip()
-                p_a1 = f"{_a1_col(p_col)}{rownum}"
-                s_a1 = f"{_a1_col(s_col)}{rownum}"
-                data.append({"range": f"{sheet_name}!{p_a1}", "values": [[paragraph]]})
-                data.append({"range": f"{sheet_name}!{s_a1}", "values": [[ssml]]})
-
+                rownum = int(item.get("row") or 0)
+                if rownum < 2: continue
+                p = (item.get("paragraph") or "").strip()
+                s = (item.get("ssml") or "").strip()
+                data.append({"range": f"{sheet_name}!{_a1_col(p_col)}{rownum}", "values": [[p]]})
+                data.append({"range": f"{sheet_name}!{_a1_col(s_col)}{rownum}", "values": [[s]]})
             if data:
                 sheets.values().batchUpdate(
                     spreadsheetId=sheet_id,
@@ -571,29 +505,37 @@ def save_batch_task(
     logger.info(f"[Batch {batch_no}] Saved {len(batch_results)} rows to {results_path}")
     return {"saved_batch": batch_no, "count": len(batch_results)}
 
+
+@shared_task(bind=True)
+def finalize_job_task(self, prior_results, job_id: str, results_rel: str, mode: str) -> dict:
+    try:
+        download_url = default_storage.url(results_rel)
+    except Exception:
+        download_url = ""
+    # Mark success in DB
+    job_set_state(job_id, state="SUCCESS", download_url=download_url, results_path=results_rel)
+    return {"job_id": job_id, "download_url": download_url, "results": results_rel, "mode": mode, "state": "SUCCESS"}
+
+
+
 @shared_task(bind=True)
 def orchestrate_paragraphs_job(
     self,
-    # local file mode (backward compatible)
     file_path: Optional[str] = None,
     sheet: Optional[str] = None,
     batch_size: int = 25,
-    # google sheet mode
-    mode: str = "local_file",                 # "local_file" | "google_sheet"
-    sheet_public_url: Optional[str] = None,   # required if mode == "google_sheet"
-    sheet_id: Optional[str] = None,           # optional: for write-back
-    sheet_name: Optional[str] = None,         # optional: default "Sheet1"
+    mode: str = "local_file",
+    sheet_public_url: Optional[str] = None,
+    sheet_id: Optional[str] = None,
+    sheet_name: Optional[str] = None,
 ) -> dict:
-    """
-    Orchestrates paragraph generation in batches from either:
-      - local .xlsx (mode='local_file'), or
-      - Google Sheet public CSV (mode='google_sheet').
+    job_id = str(self.request.id)
 
-    Returns: { job_id, results: <xlsx path>, batches: <int>, mode: <mode> }
-    """
-    job_id = self.request.id
+    # Create JobRun immediately
+    job_get_or_create(job_id, mode=mode, file_path=(file_path or ""), sheet_name=(sheet or sheet_name or ""))
+    job_set_state(job_id, state="RUNNING")
 
-    # Prepare results workbook with headers
+    # Prep results workbook
     results_rel = f"{RESULTS_DIR}/{job_id}.xlsx"
     wb = Workbook()
     ws = wb.active
@@ -608,8 +550,8 @@ def orchestrate_paragraphs_job(
         resp = requests.get(sheet_public_url, timeout=30)
         resp.raise_for_status()
         df = pd.read_csv(io.StringIO(resp.text))
-
         cols_lower = {c.lower().strip(): c for c in df.columns}
+
         def pick(*cands):
             for c in cands:
                 if c in cols_lower:
@@ -617,13 +559,13 @@ def orchestrate_paragraphs_job(
             return None
 
         col_icon = pick("icon name", "icon", "name")
-        col_cat = pick("category",)
+        col_cat = pick("category")
         col_notes = pick("notes", "note", "description")
         if not (col_icon or col_cat or col_notes):
             raise ValueError("CSV is missing required columns: (Icon Name | Category | Notes)")
 
         for idx, r in df.iterrows():
-            sheet_rownum = idx + 2  # row 1 = header
+            sheet_rownum = idx + 2
             icon = str(r.get(col_icon, "")).strip() if col_icon else ""
             cat = str(r.get(col_cat, "")).strip() if col_cat else ""
             notes = str(r.get(col_notes, "")).strip() if col_notes else ""
@@ -635,10 +577,11 @@ def orchestrate_paragraphs_job(
         if not file_path:
             raise ValueError("file_path is required for mode='local_file'")
         abs_path = default_storage.path(file_path)
+        # You already have iter_rows_streaming; call it here.
+        from core.utils import iter_rows_streaming  # keep your import path
         for r in iter_rows_streaming(abs_path, sheet=sheet):
             yield r
 
-    # choose source
     if (mode or "").lower() == "google_sheet":
         row_iter = google_sheet_rows()
         mode = "google_sheet"
@@ -646,7 +589,7 @@ def orchestrate_paragraphs_job(
         row_iter = local_file_rows()
         mode = "local_file"
 
-    # --- batching ---
+    # batching
     def _chunker(it: Iterable[Dict], n: int) -> Iterable[List[Dict]]:
         buf: List[Dict] = []
         for item in it:
@@ -657,25 +600,43 @@ def orchestrate_paragraphs_job(
         if buf:
             yield buf
 
+    chains = []
     total_batches = 0
     for total_batches, rows in enumerate(_chunker(row_iter, batch_size), start=1):
-        g = group(process_row_task.s(row) for row in rows)
-        # Pass mode/sheet params to the callback so it can write back to Google Sheet
-        chord(g)(save_batch_task.s(job_id, total_batches, results_rel, mode, sheet_id, sheet_name or "Sheet1"))
-
-        logger.info(f"[{mode}] Scheduled batch {total_batches} for job {job_id}")
+        header = group(process_row_task.s(row) for row in rows)
+        callback = save_batch_task.s(
+            job_id=job_id,
+            batch_no=total_batches,
+            results_path=results_rel,
+            mode=mode,
+            sheet_id=sheet_id,
+            sheet_name=(sheet_name or "Sheet1"),
+        )
+        chains.append(chain(header, callback))
         self.update_state(state="PROGRESS", meta={"scheduled_batches": total_batches, "mode": mode})
 
-    download_url = None
-    try:
-        download_url = default_storage.url(results_rel)  # e.g. /media/uploads/results/<job>.xlsx
-    except Exception:
-        pass
+    if not chains:
+        try:
+            download_url = default_storage.url(results_rel)
+        except Exception:
+            download_url = None
+        job_set_state(job_id, state="SUCCESS", results_path=results_rel, download_url=download_url)
+        return {"job_id": job_id, "results": results_rel, "download_url": download_url,
+                "batches": 0, "mode": mode, "state": "READY"}
 
+    # master chord -> finalize
+    final_cb = finalize_job_task.s(job_id, results_rel, mode).set(queue="default")
+    final_async = chord(group(*chains))(final_cb)
+    # Persist results path, batches, and **handoff_id** so status can follow it
+    job_touch(job_id, results_path=results_rel, batches=total_batches, handoff_id=final_async.id)
+
+    # Return metadata (unchanged contract)
     return {
         "job_id": job_id,
+        "handoff_id": final_async.id,
         "results": results_rel,
-        "download_url": download_url,   # <-- return this
         "batches": total_batches,
         "mode": mode,
+        "state": "SCHEDULED",
+        "jobs_url": "/api/jobs/",
     }

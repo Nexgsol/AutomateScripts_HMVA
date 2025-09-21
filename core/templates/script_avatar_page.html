@@ -2,13 +2,12 @@
 {% block content %}
 <h2>Studio: Script → HeyGen</h2>
 
-<form method="post" id="studio-form" enctype="multipart/form-data">{% csrf_token %}
-  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items:start;">
+<form method="post" id="studio-form" enctype="multipart/form-data" style="max-width: 100%">{% csrf_token %}
+  <div style="display:block; width:100%;">
 
-    <!-- LEFT COLUMN -->
+    <!-- UPLOAD BLOCK (full width) -->
     <div>
-      <!-- Upload block -->
-      <h3>0) Upload Spreadsheet (.xlsx)</h3>
+      <h3>Upload Spreadsheet (.xlsx)</h3>
 
       <div>
         <label for="id_file">Spreadsheet file (.xlsx)</label>
@@ -17,17 +16,18 @@
           id="id_file"
           name="file"
           accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          style="width:100%"
         />
       </div>
 
       <div style="margin-top:8px">
         <label for="id_sheet">Sheet name (optional)</label>
-        <input type="text" id="id_sheet" name="sheet" placeholder="Sheet1" />
+        <input type="text" id="id_sheet" name="sheet" placeholder="Sheet1" style="width:100%" />
       </div>
 
       <div style="margin-top:8px">
         <label for="id_batch">Batch size (optional)</label>
-        <input type="number" id="id_batch" name="batch_size" min="1" step="1" placeholder="25" value="1" />
+        <input type="number" id="id_batch" name="batch_size" min="1" step="1" placeholder="25" value="1" style="width:100%" />
       </div>
 
       <button type="submit"
@@ -41,169 +41,116 @@
       <div id="upload-results" style="margin-top:12px; display:none; border:1px solid #ddd; padding:10px; border-radius:8px;">
         <div id="job-id-line" style="margin-bottom:6px;"></div>
         <a id="results-download" class="btn btn-primary" href="#" download style="display:none;">Download Processed Results</a>
+        <button type="button" id="btn-load-results" style="margin-left:8px; display:none;">Load Latest Results</button>
         <div id="upload-msg" style="margin-top:8px; font-size:.9em; opacity:.8;"></div>
       </div>
 
-      <!-- (Single-paragraph UI kept commented)
-      <hr style="margin:20px 0" />
-      <h3>1) Icon & Paragraph</h3>
-      <div>
-        <label>{{ form.brand.label }}</label>
-        {{ form.brand }}
-      </div>
-      <div style="margin-top:8px">
-        <label>{{ form.icon.label }}</label>
-        {{ form.icon }}
-      </div>
-      <div style="margin-top:8px">
-        <label>{{ form.category.label }}</label>
-        {{ form.category }}
-      </div>
-      <div style="margin-top:8px">
-        <label>{{ form.notes.label }}</label>
-        {{ form.notes }}
-      </div>
-      <div style="margin-top:8px">
-        <label>{{ form.duration.label }}</label>
-        {{ form.duration }}
-      </div>
-      <button type="button" id="btn-generate" style="margin-top:12px">Generate Paragraph</button>
-
-      <h4 style="margin-top:16px">Paragraph Preview</h4>
-      <textarea id="paragraph" rows="10" style="width:100%" readonly>{{ paragraph }}</textarea>
-<<<<<<< HEAD
-      <h4 style="margin-top:16px">SSML Output</h4>
-      <textarea id="ssml-output" rows="10" style="width:100%" readonly>{{ ssml }}</textarea>
-      -->
-=======
-
-      <h4 style="margin-top:16px">SSML Output</h4>
-      <textarea id="ssml-output" rows="10" style="width:100%" readonly>{{ ssml }}</textarea>
->>>>>>> main
+      <h3 style="margin-top:16px">Recent Jobs</h3>
+      <button type="button" id="btn-refresh-jobs">Refresh</button>
+      <table id="jobs-table" style="width:100%; border-collapse:collapse; margin-top:8px">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:6px">Job</th>
+            <th style="text-align:left;padding:6px">State</th>
+            <th style="text-align:left;padding:6px">Mode</th>
+            <th style="text-align:left;padding:6px">Created</th>
+            <th style="text-align:left;padding:6px">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
     </div>
 
-    <!-- RIGHT COLUMN -->
-    <div>
-      <h3>2) Pick Avatar & Voice</h3>
-
-      <div>
-        <label>HeyGen Avatar</label>
-        <select id="heygen-avatar-select">
-          <option value="">Loading…</option>
-        </select>
-        <input type="hidden" name="heygen_avatar_id" id="id_heygen_avatar_id"/>
-      </div>
-
-      <div style="margin-top:12px">
-        <label>HeyGen Voice (optional)</label>
-        <select id="heygen-voice-select">
-          <option value="">Loading…</option>
-        </select>
-        <input type="hidden" name="heygen_voice_id" id="id_heygen_voice_id"/>
-      </div>
-
-      <div style="margin-top:12px">
-        <label>ElevenLabs Voice ID (for audio)</label>
-        <input type="text" id="eleven-voice-id" placeholder="e.g. 21m00Tcm4TlvDq8ikWAM" style="width:100%">
-      </div>
-
-      <button type="button" id="btn-voice" style="margin-top:12px">
-        Generate Voice (ElevenLabs)
-      </button>
-
-      <audio id="voice-audio" controls style="display:none; width:100%; margin-top:8px;"></audio>
-      <a id="voice-download" href="#" download="voice.mp3" style="display:none; margin-top:6px; display:inline-block;">
-        Download Audio
-      </a>
-
-      <input type="hidden" name="action" id="action-field" value="">
-      <input type="hidden" name="audio_url" id="id_audio_url">
-
-      <button type="submit"
-              onclick="document.getElementById('action-field').value='generate_video';"
-              style="margin-top:16px">
-        Create Video
-      </button>
-    </div>
   </div>
+
+  <!-- Hidden action field -->
+  <input type="hidden" name="action" id="action-field" value="">
 </form>
 
+<!-- Preview table -->
+<div id="results-wrap" style="margin-top:16px; display:none;">
+  <h3 style="margin-top:24px">Processed Rows Preview</h3>
+  <table id="results-table" style="width:100%; border-collapse:collapse;">
+    <thead><tr id="results-head"></tr></thead>
+    <tbody id="results-body"></tbody>
+  </table>
+</div>
 
 <script>
   const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || "";
 
-  // Make optional so file-only submit works even if those fields exist in DOM
-  ["id_brand","id_icon","id_category","id_notes","id_duration"].forEach(id=>{
-    const el = document.getElementById(id);
-    if (el) el.removeAttribute("required");
-  });
-
-  // --- Elements (some may not exist if that section is commented) ---
+  // Elements
   const formEl     = document.getElementById("studio-form");
   const actionFld  = document.getElementById("action-field");
+  const uploadBtn  = document.getElementById("btn-upload");
+  const resultsBox = document.getElementById("upload-results");
+  const jobLine    = document.getElementById("job-id-line");
+  const dlBtn      = document.getElementById("results-download");
+  const loadBtn    = document.getElementById("btn-load-results");
+  const msgBox     = document.getElementById("upload-msg");
 
-  const iconSelect   = document.getElementById("id_icon");
-  const catInput     = document.getElementById("id_category");
-  const notesInput   = document.getElementById("id_notes");
-  const durationInput= document.getElementById("id_duration");
-  const paraBox      = document.getElementById("paragraph");
-  const ssmlBox      = document.getElementById("ssml-output");
-  const btnGen       = document.getElementById("btn-generate");
+  // Preview helpers
+  let currentJobId = null;
 
-  const uploadBtn    = document.getElementById("btn-upload");
-  const resultsBox   = document.getElementById("upload-results");
-  const jobLine      = document.getElementById("job-id-line");
-  const dlBtn        = document.getElementById("results-download");
-  const msgBox       = document.getElementById("upload-msg");
+  function renderTable(headers, rows){
+    const head = document.getElementById("results-head");
+    const body = document.getElementById("results-body");
+    const wrap = document.getElementById("results-wrap");
+    head.innerHTML = ""; body.innerHTML = "";
 
-  // Optional: auto-fill meta
-  async function refreshIconMeta(){
-    const id = iconSelect?.value;
-    if(!id){ if(catInput) catInput.value=""; if(notesInput) notesInput.value=""; return; }
-    try {
-      const r = await fetch(`/api/icons/${id}/meta`, { cache: "no-store" });
-      const j = await r.json();
-      if(catInput)  catInput.value   = j.category || "";
-      if(notesInput) notesInput.value = j.notes || "";
-    } catch(e) {}
-  }
-  if (iconSelect) { iconSelect.addEventListener("change", refreshIconMeta); refreshIconMeta(); }
-
-  // -----------------------------
-  // Single paragraph (if enabled)
-  // -----------------------------
-  if (btnGen) {
-    btnGen.addEventListener("click", async () => {
-      const iconText = iconSelect?.options[iconSelect.selectedIndex]?.text || "";
-      const notes    = notesInput?.value || "";
-      const duration = durationInput?.value || "";
-
-      btnGen.disabled = true;
-      const prev = btnGen.textContent;
-      btnGen.textContent = "Generating…";
-
-      try {
-        const r = await fetch("/api/v1/paragraph", {
-          method:"POST",
-          headers: {"Content-Type":"application/json", "X-CSRFToken": csrf},
-          body: JSON.stringify({icon: iconText, notes, duration})
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || "Failed");
-        if (paraBox) paraBox.value = j?.data?.paragraph || j?.paragraph || "";
-        if (ssmlBox) ssmlBox.value = j?.data?.ssml || j?.ssml || "";
-      } catch (e) {
-        alert("Error generating paragraph.");
-      } finally {
-        btnGen.disabled = false;
-        btnGen.textContent = prev;
-      }
+    (headers || []).forEach(h=>{
+      const th = document.createElement("th");
+      th.textContent = (h || "").toString();
+      th.style.textAlign = "left";
+      th.style.padding = "8px";
+      head.appendChild(th);
     });
+
+    (rows || []).forEach(r=>{
+      const tr = document.createElement("tr");
+      (headers || []).forEach(h=>{
+        const td = document.createElement("td");
+        td.textContent = (r?.[h] ?? "").toString();
+        td.style.padding = "8px";
+        td.style.borderTop = "1px solid #eee";
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+
+    if (wrap) wrap.style.display = "block";
   }
 
-  // ----------------------------------------
-  // File upload → queue job → poll → download
-  // ----------------------------------------
+  async function fetchAndRenderResults(jobId){
+    if(!jobId) return;
+    try{
+      if(loadBtn){ loadBtn.disabled = true; loadBtn.textContent = "Loading…"; }
+      const r = await fetch(`/api/jobs/${jobId}/results/?limit=200`, {cache:"no-store"});
+      if(!r.ok){
+        msgBox.textContent = "Results not ready yet. Try again.";
+        return;
+      }
+      const j = await r.json();
+
+      if (j.download_url){
+        dlBtn.href = j.download_url;
+        dlBtn.style.display = "inline-block";
+      }
+
+      renderTable(j.headers || [], j.rows || []);
+      msgBox.textContent = (j.rows || []).length ? `Loaded ${j.count} row(s).` : "No rows yet—click Load Latest Results again in a bit.";
+    } catch(e){
+      msgBox.textContent = "Error loading results.";
+    } finally{
+      if(loadBtn){ loadBtn.disabled = false; loadBtn.textContent = "Load Latest Results"; }
+    }
+  }
+
+  if (loadBtn){
+    loadBtn.addEventListener("click", ()=> fetchAndRenderResults(currentJobId));
+  }
+
+  // Poll status endpoint until SUCCESS/FAILURE
   async function pollJob(statusUrl) {
     if (!statusUrl) return;
     let tries = 0;
@@ -218,180 +165,116 @@
 
         if (st.state === "SUCCESS") {
           clearInterval(t);
-          const url = st.download_url || "";
-          if (url) {
-            if (dlBtn) { dlBtn.href = url; dlBtn.style.display = "inline-block"; }
-            if (msgBox) msgBox.textContent = "Done. Download ready.";
-          } else {
-            if (msgBox) msgBox.textContent = "Done, but no download URL returned.";
+          if (st.download_url) {
+            dlBtn.href = st.download_url;
+            dlBtn.style.display = "inline-block";
           }
+          msgBox.textContent = "Done. Download ready.";
+          fetchAndRenderResults(currentJobId);
         } else if (st.state === "FAILURE") {
           clearInterval(t);
-          if (msgBox) msgBox.textContent = st.error || "Job failed.";
-        } else {
-          if (msgBox) msgBox.textContent = "Processing…";
+          msgBox.textContent = st.error || "Job failed.";
+        } else if (["STARTED","PROGRESS","RUNNING","RECEIVED"].includes(st.state)) {
+          msgBox.textContent = "Processing…";
+        } else if (st.state === "PENDING") {
+          msgBox.textContent = "Queued…";
         }
 
         if (tries >= maxTries) {
           clearInterval(t);
-          if (msgBox) msgBox.textContent = "Timed out waiting for job.";
+          msgBox.textContent = "Timed out waiting for job.";
         }
       } catch (e) {
         if (tries >= maxTries) {
           clearInterval(t);
-          if (msgBox) msgBox.textContent = "Polling error.";
+          msgBox.textContent = "Polling error.";
         }
       }
     }, 2000);
   }
 
+  // Recent Jobs
+  async function loadJobs(){
+    try{
+      const r = await fetch("/api/jobs/?limit=25", {cache:"no-store"});
+      const j = await r.json();
+      const body = document.getElementById("jobs-body");
+      body.innerHTML = "";
+      (j.jobs || []).forEach(job=>{
+        const tr = document.createElement("tr");
+        const state = job.state || "QUEUED";
+
+        const tdJob = `<td style="padding:6px; border-top:1px solid #eee; font-family:monospace">${job.job_id}</td>`;
+        const badgeColor = state === "SUCCESS" ? "#16a34a" : state === "FAILURE" ? "#dc2626" : "#2563eb";
+        const tdState = `<td style="padding:6px; border-top:1px solid #eee;"><span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${badgeColor};color:#fff;font-size:12px">${state}</span></td>`;
+        const tdMode = `<td style="padding:6px; border-top:1px solid #eee;">${job.mode || ""}</td>`;
+        const tdCreated = `<td style="padding:6px; border-top:1px solid #eee;">${(job.created_at||"").replace("T"," ").slice(0,19)}</td>`;
+
+        const viewBtn = `<button type="button" class="btn btn-sm" onclick="fetchAndRenderResults('${job.job_id}')">View</button>`;
+        const dlBtnHtml = job.download_url ? `<a href="${job.download_url}" class="btn" style="margin-right:8px">Download</a>` : "";
+        const tdActions = `<td style="padding:6px; border-top:1px solid #eee;">${dlBtnHtml}${viewBtn}</td>`;
+
+        tr.innerHTML = tdJob+tdState+tdMode+tdCreated+tdActions;
+        body.appendChild(tr);
+      });
+    } catch(e){
+      // ignore
+    }
+  }
+  document.getElementById("btn-refresh-jobs")?.addEventListener("click", loadJobs);
+  document.addEventListener("DOMContentLoaded", loadJobs);
+
+  // Submit handler for file upload
   if (formEl) {
     formEl.addEventListener("submit", async (e) => {
-      // Only intercept the Upload & Process Sheet action
-      if (!actionFld || actionFld.value !== "upload_sheet") return;
-
+      if (!actionFld || actionFld.value !== "upload_sheet") return; // only intercept for upload
       e.preventDefault();
 
       const fd = new FormData(formEl); // file, sheet, batch_size, csrf, action
       try {
-        if (uploadBtn) {
-          uploadBtn.disabled = true;
-          uploadBtn.textContent = "Uploading…";
-        }
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = "Uploading…";
 
         const r = await fetch("/api/v1/paragraph", {
           method: "POST",
-          headers: { "X-CSRFToken": csrf }, // don't set Content-Type with FormData
+          headers: { "X-CSRFToken": csrf },
           body: fd
         });
         const j = await r.json();
 
-        if (resultsBox) resultsBox.style.display = "block";
-        if (dlBtn) dlBtn.style.display = "none";        // hide download until SUCCESS
-        if (msgBox) msgBox.textContent = "";
-        if (jobLine) jobLine.textContent = j.job_id ? `Job: ${j.job_id}` : "";
+        resultsBox.style.display = "block";
+        dlBtn.style.display = "none";
+        msgBox.textContent = "";
+        jobLine.textContent = j.job_id ? `Job: ${j.job_id}` : "";
 
         if (!r.ok) {
-          if (msgBox) msgBox.textContent = j.error || "Upload failed.";
+          msgBox.textContent = j.error || "Upload failed.";
           return;
         }
 
-        // If backend returns status_url, poll it; otherwise try to construct one from job_id
-        const statusUrl = j.status_url || (j.job_id ? `/api/jobs/${j.job_id}/status/` : null);
+        currentJobId = j.job_id || null;
+        if (loadBtn) loadBtn.style.display = currentJobId ? "inline-block" : "none";
 
         if (j.download_url) {
-          // (Rare) if the results are already available
-          if (dlBtn) { dlBtn.href = j.download_url; dlBtn.style.display = "inline-block"; }
-          if (msgBox) msgBox.textContent = "Done. Download ready.";
-        } else if (statusUrl) {
-          if (msgBox) msgBox.textContent = "Queued. Processing…";
-          pollJob(statusUrl);
+          dlBtn.href = j.download_url;
+          dlBtn.style.display = "inline-block";
+          msgBox.textContent = "Done. Download ready.";
+          fetchAndRenderResults(currentJobId);
         } else {
-          if (msgBox) msgBox.textContent = "Queued, but no status URL was returned.";
+          const statusUrl = j.status_url || (j.job_id ? `/api/jobs/${j.job_id}/status/` : null);
+          msgBox.textContent = statusUrl ? "Queued. Processing…" : "Queued.";
+          if (statusUrl) pollJob(statusUrl);
         }
       } catch (err) {
-        if (resultsBox) resultsBox.style.display = "block";
-        if (dlBtn) dlBtn.style.display = "none";
-        if (msgBox) msgBox.textContent = "Upload error.";
+        resultsBox.style.display = "block";
+        dlBtn.style.display = "none";
+        msgBox.textContent = "Upload error.";
       } finally {
-        if (uploadBtn) {
-          uploadBtn.disabled = false;
-          uploadBtn.textContent = "Upload & Process Sheet";
-        }
-        if (actionFld) actionFld.value = ""; // reset
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = "Upload & Process Sheet";
+        if (actionFld) actionFld.value = "";
       }
     });
   }
-
-  // ------------------------------
-  // ElevenLabs TTS (unchanged)
-  // ------------------------------
-  const btnVoice = document.getElementById('btn-voice');
-  const elevenVoiceInput = document.getElementById('eleven-voice-id');
-  const audioEl = document.getElementById('voice-audio');
-  const dlLink = document.getElementById('voice-download');
-  const voSel = document.getElementById("heygen-voice-select");
-  const voHidden = document.getElementById("id_heygen_voice_id");
-  const hidAudio = document.getElementById('id_audio_url');
-
-  if (voSel) {
-    voSel.addEventListener("change", () => {
-      const val = voSel.value;
-      if (voHidden) voHidden.value = val;
-      if (elevenVoiceInput) elevenVoiceInput.value = val;
-    });
-  }
-
-  if (btnVoice) {
-    btnVoice.addEventListener('click', async () => {
-      const voiceId = (elevenVoiceInput?.value || '').trim();
-      const ssml = (ssmlBox?.value || '').trim();
-      if (!voiceId) { alert('Please enter an ElevenLabs Voice ID.'); return; }
-      if (!ssml) { alert('SSML is empty. Generate the paragraph first.'); return; }
-
-      btnVoice.disabled = true;
-      const prev = btnVoice.textContent;
-      btnVoice.textContent = 'Generating voice…';
-
-      try {
-        const fd = new FormData();
-        fd.append('voice_id', voiceId);
-        fd.append('ssml', ssml);
-
-        const r = await fetch("{% url 'api-tts-elevenlabs' %}", {
-          method: 'POST',
-          headers: {'X-CSRFToken': csrf},
-          body: fd
-        });
-        const j = await r.json();
-        if (j.audio_url) {
-          audioEl.src = j.audio_url;
-          audioEl.style.display = 'block';
-          audioEl.load();
-          dlLink.href = j.audio_url;
-          dlLink.style.display = 'inline-block';
-          hidAudio.value = new URL(j.audio_url, window.location.origin).href;
-        } else {
-          alert(j.error || 'Failed to generate audio.');
-        }
-      } catch (e) {
-        alert('Error generating audio.');
-      } finally {
-        btnVoice.disabled = false;
-        btnVoice.textContent = prev;
-      }
-    });
-  }
-
-  // ------------------------------
-  // Load HeyGen avatars/voices
-  // ------------------------------
-  const avSel = document.getElementById("heygen-avatar-select");
-  const avHidden = document.getElementById("id_heygen_avatar_id");
-
-  function setSelOptions(sel, items, idKey, nameKey){
-    if (!sel) return;
-    sel.innerHTML = '<option value="">Select…</option>';
-    (items || []).forEach(it=>{
-      const opt = document.createElement("option");
-      opt.value = it[idKey] || it["id"] || it["avatar_id"] || "";
-      opt.textContent = it[nameKey] || it["name"] || opt.value;
-      sel.appendChild(opt);
-    });
-  }
-
-  async function loadHeygen(){
-    try{
-      const a = await (await fetch("/api/heygen/avatars")).json();
-      setSelOptions(avSel, a.avatars || [], "id", "name");
-    }catch(e){ if(avSel) avSel.innerHTML = '<option value="">(no avatars)</option>'; }
-    try{
-      const v = await (await fetch("/api/heygen/voices")).json();
-      const vs = document.getElementById("heygen-voice-select");
-      setSelOptions(vs, v.voices || [], "id", "name");
-    }catch(e){ const vs = document.getElementById("heygen-voice-select"); if(vs) vs.innerHTML = '<option value="">(no voices)</option>'; }
-  }
-  if (avSel) avSel.addEventListener("change", ()=> { if (avHidden) avHidden.value = avSel.value; });
-  loadHeygen();
 </script>
 {% endblock %}
