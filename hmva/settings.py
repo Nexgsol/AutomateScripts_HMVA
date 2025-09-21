@@ -78,12 +78,41 @@ WSGI_APPLICATION = "hmva.wsgi.application"
 
 # ---------- Database (SQLite on Railway Volume) ----------
 # Add a Railway Volume and set SQLITE_PATH=/data/db.sqlite3
-DATABASES = {
-    "default": {
+DATABASES = {}
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+if DATABASE_URL:
+    # Ensure postgresql:// scheme (Railway may still give postgres://)
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+    try:
+        import dj_database_url
+        DATABASES["default"] = dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "600")),  # persistent conns
+            ssl_require=True,  # add sslmode=require
+        )
+    except Exception:
+        # Safe fallback if dj_database_url isn't installed for some reason
+        from urllib.parse import urlparse
+        parsed = urlparse(DATABASE_URL)
+        DATABASES["default"] = {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": parsed.path.lstrip("/"),
+            "USER": parsed.username,
+            "PASSWORD": parsed.password or "",
+            "HOST": parsed.hostname,
+            "PORT": str(parsed.port or "5432"),
+            "OPTIONS": {"sslmode": "require"},
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "600")),
+        }
+else:
+    # Local/dev fallback
+    DATABASES["default"] = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": os.getenv("SQLITE_PATH", str(BASE_DIR / "db.sqlite3")),
     }
-}
 
 # ---------- Internationalization ----------
 LANGUAGE_CODE = "en-us"
@@ -103,7 +132,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ---------- Celery / Redis ----------
 # Railway’s Redis plugin exposes REDIS_URL; we accept either CELERY_* or REDIS_URL.
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TASK_ACKS_LATE = True
@@ -112,6 +141,7 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["json"]
+
 
 # Route CPU/API heavy tasks to dedicated queues (matches your workers)
 CELERY_TASK_ROUTES = {
