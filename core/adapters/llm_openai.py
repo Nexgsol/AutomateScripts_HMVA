@@ -20,7 +20,9 @@ def chat(system: str, user: str, temperature: float = 0.5) -> str:
     """
     # Local fallback when no key present (your original stub)
     if not OPENAI_API_KEY:
-        return ("This icon shaped menswear with rugged simplicity. Signature pieces included a Harrington jacket, "
+        return json.dumps({
+            "text": (
+                "This icon shaped menswear with rugged simplicity. Signature pieces included a Harrington jacket, "
                 "slim chinos, desert boots, and often Persol sunglasses. Across film sets and city streets, "
                 "his wardrobe adapted without losing its edge. His legacy anchors modern heritage style."
             ),
